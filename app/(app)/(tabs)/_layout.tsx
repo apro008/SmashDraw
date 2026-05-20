@@ -1,36 +1,18 @@
-import { useMemo } from 'react';
 import { Tabs } from 'expo-router';
-import { Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '~/hooks/useTheme';
+import { AnimatedMotionTabBar } from '~/motion-tabs/AnimatedMotionTabBar';
 
 export default function TabLayout() {
   const { colors } = useTheme();
 
-  const tabBarStyle = useMemo(
-    () => ({
-      backgroundColor: colors.tabBar,
-      borderTopColor: colors.border,
-      borderTopWidth: 1,
-      height: Platform.OS === 'ios' ? 88 : 62,
-      paddingBottom: Platform.OS === 'ios' ? 28 : 10,
-      paddingTop: 8,
-    }),
-    [colors]
-  );
-
   return (
     <Tabs
+      tabBar={(props) => <AnimatedMotionTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarStyle,
-        tabBarActiveTintColor: colors.tabBarActive,
-        tabBarInactiveTintColor: colors.tabBarInactive,
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontFamily: 'Inter_Medium',
-          marginTop: -2,
-        },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
       }}
     >
       <Tabs.Screen

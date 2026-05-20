@@ -4,10 +4,14 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { AuthProvider } from '~/providers/AuthProvider';
+import { AlertProvider } from '~/providers/AlertProvider';
 import { useTheme } from '~/hooks/useTheme';
+import { SplashLoader } from '~/components/SplashLoader';
 
 SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ duration: 600, fade: true });
 
 export default function RootLayout() {
   const [loaded] = useFonts({
@@ -21,13 +25,17 @@ export default function RootLayout() {
     if (loaded) SplashScreen.hideAsync();
   }, [loaded]);
 
-  if (!loaded) return null;
+  if (!loaded) return <SplashLoader />;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <RootStack />
-      </AuthProvider>
+      <KeyboardProvider>
+        <AuthProvider>
+          <AlertProvider>
+            <RootStack />
+          </AlertProvider>
+        </AuthProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

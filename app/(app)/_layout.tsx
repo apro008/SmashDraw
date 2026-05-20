@@ -1,11 +1,20 @@
-import { Stack, Redirect } from 'expo-router';
+import { useEffect } from 'react';
+import { Stack, Redirect, router } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { useSession } from '~/providers/AuthProvider';
+import { useAuthStore } from '~/store/useAuthStore';
 import { useTheme } from '~/hooks/useTheme';
 
 export default function AppLayout() {
   const { session, loading } = useSession();
+  const profile = useAuthStore((s) => s.profile);
   const { colors } = useTheme();
+
+  useEffect(() => {
+    if (!loading && session && profile !== null && !profile.city) {
+      router.replace('/(app)/onboarding');
+    }
+  }, [loading, session, profile]);
 
   if (loading) {
     return (

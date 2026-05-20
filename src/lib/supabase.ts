@@ -11,6 +11,33 @@ const ExpoSecureStoreAdapter = {
   removeItem: (key: string) => SecureStore.deleteItemAsync(key),
 };
 
+if (__DEV__ && supabaseUrl) {
+  const _fetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+    const isSupabase = url.includes(supabaseUrl);
+    if (isSupabase) {
+      const method = init?.method ?? 'GET';
+      console.log(`\n[API →] ${method} ${url}`);
+      if (init?.body) {
+        try {
+          console.log('[API →] Body:', JSON.parse(init.body as string));
+        } catch {}
+      }
+    }
+    const res = await _fetch(input, init);
+    if (isSupabase) {
+      res
+        .clone()
+        .json()
+        .then((data: unknown) => console.log(`[API ←] ${res.status}`, data))
+        .catch(() => {});
+    }
+    return res;
+  };
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: ExpoSecureStoreAdapter,

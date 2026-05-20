@@ -1,13 +1,6 @@
-import { useState, useMemo } from 'react';
-import {
-  View,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import { useState, useMemo, useRef } from 'react';
+import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +17,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const { login, loading, error, clearError } = useAuthStore();
+  const passwordRef = useRef<TextInput>(null);
 
   const handleLogin = async () => {
     if (!email.trim() || !password) return;
@@ -33,15 +27,12 @@ export default function Login() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        bottomOffset={16}
       >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
           {/* Hero header */}
           <View style={styles.hero}>
             <View style={styles.logoWrap}>
@@ -79,6 +70,8 @@ export default function Login() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="next"
+                onSubmitEditing={() => passwordRef.current?.focus()}
+                blurOnSubmit={false}
               />
             </View>
 
@@ -89,6 +82,7 @@ export default function Login() {
               </AppText>
               <View>
                 <TextInput
+                  ref={passwordRef}
                   style={[styles.input, { paddingRight: 48 }]}
                   value={password}
                   onChangeText={setPassword}
@@ -141,8 +135,7 @@ export default function Login() {
               </Link>
             </View>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

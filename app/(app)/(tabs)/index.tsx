@@ -1,138 +1,35 @@
-import { useState, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
-  RefreshControl,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { AppText } from '~/components/AppText';
 import { TournamentCard } from '~/components/TournamentCard';
 import { useTheme } from '~/hooks/useTheme';
 import { useAuthStore } from '~/store/useAuthStore';
 import { Tournament } from '~/types';
-
-// Mock data — replace with Supabase queries
-const MOCK_TOURNAMENTS: Tournament[] = [
-  {
-    id: 't1',
-    title: 'Kolkata Open Badminton Championship 2025',
-    description: null,
-    city: 'Kolkata',
-    state: 'West Bengal',
-    venue: 'Netaji Indoor Stadium',
-    venue_address: 'Gate No. 2, Netaji Indoor Stadium, Kolkata',
-    start_date: '2025-06-15',
-    end_date: '2025-06-17',
-    registration_deadline: '2025-06-10',
-    organizer_id: 'u1',
-    organizer_name: 'West Bengal Badminton Association',
-    banner_url: null,
-    rules: null,
-    status: 'open',
-    contact_phone: '+91 98300 00001',
-    contact_email: null,
-    prize_pool: '₹50,000',
-    max_courts: 8,
-    created_at: '2025-05-01',
-    categories: [
-      { id: 'c1', tournament_id: 't1', name: "Men's Singles", entry_fee: 500, max_players: 64, current_players: 38, skill_level: 'open', prize: '₹15,000' },
-      { id: 'c2', tournament_id: 't1', name: "Women's Singles", entry_fee: 500, max_players: 32, current_players: 18, skill_level: 'open', prize: '₹10,000' },
-      { id: 'c3', tournament_id: 't1', name: 'Mixed Doubles', entry_fee: 800, max_players: 32, current_players: 14, skill_level: 'open', prize: '₹12,000' },
-    ],
-  },
-  {
-    id: 't2',
-    title: 'Durgapur Smash Series',
-    description: null,
-    city: 'Durgapur',
-    state: 'West Bengal',
-    venue: 'Durgapur Sports Complex',
-    venue_address: null,
-    start_date: '2025-06-22',
-    end_date: '2025-06-22',
-    registration_deadline: '2025-06-18',
-    organizer_id: 'u2',
-    organizer_name: 'Durgapur Shuttlers Club',
-    banner_url: null,
-    rules: null,
-    status: 'open',
-    contact_phone: '+91 94320 00002',
-    contact_email: null,
-    prize_pool: '₹20,000',
-    max_courts: 4,
-    created_at: '2025-05-10',
-    categories: [
-      { id: 'c4', tournament_id: 't2', name: "Men's Doubles", entry_fee: 800, max_players: 24, current_players: 10, skill_level: 'open', prize: '₹8,000' },
-      { id: 'c5', tournament_id: 't2', name: "Women's Doubles", entry_fee: 800, max_players: 16, current_players: 6, skill_level: 'open', prize: '₹6,000' },
-    ],
-  },
-  {
-    id: 't3',
-    title: 'Siliguri District Championship',
-    description: null,
-    city: 'Siliguri',
-    state: 'West Bengal',
-    venue: 'Siliguri Sports Association Hall',
-    venue_address: null,
-    start_date: '2025-07-05',
-    end_date: '2025-07-06',
-    registration_deadline: '2025-06-30',
-    organizer_id: 'u3',
-    organizer_name: 'Siliguri BA',
-    banner_url: null,
-    rules: null,
-    status: 'open',
-    contact_phone: null,
-    contact_email: null,
-    prize_pool: '₹15,000',
-    max_courts: 3,
-    created_at: '2025-05-15',
-    categories: [
-      { id: 'c6', tournament_id: 't3', name: "Men's Singles", entry_fee: 300, max_players: 48, current_players: 22, skill_level: 'beginner', prize: '₹5,000' },
-      { id: 'c7', tournament_id: 't3', name: "Boys' Singles", entry_fee: 200, max_players: 32, current_players: 18, skill_level: 'open', prize: '₹3,000' },
-    ],
-  },
-  {
-    id: 't4',
-    title: 'Bengal State Ranking Tournament',
-    description: null,
-    city: 'Kolkata',
-    state: 'West Bengal',
-    venue: 'Rabindra Sarobar Indoor Complex',
-    venue_address: null,
-    start_date: '2025-07-20',
-    end_date: '2025-07-22',
-    registration_deadline: '2025-07-15',
-    organizer_id: 'u1',
-    organizer_name: 'West Bengal Badminton Association',
-    banner_url: null,
-    rules: null,
-    status: 'open',
-    contact_phone: '+91 98300 00001',
-    contact_email: null,
-    prize_pool: '₹1,00,000',
-    max_courts: 10,
-    created_at: '2025-05-20',
-    categories: [
-      { id: 'c8', tournament_id: 't4', name: "Men's Singles", entry_fee: 1000, max_players: 128, current_players: 45, skill_level: 'open', prize: '₹30,000' },
-      { id: 'c9', tournament_id: 't4', name: "Women's Singles", entry_fee: 1000, max_players: 64, current_players: 28, skill_level: 'open', prize: '₹20,000' },
-      { id: 'c10', tournament_id: 't4', name: "Men's Doubles", entry_fee: 1500, max_players: 64, current_players: 20, skill_level: 'open', prize: '₹25,000' },
-    ],
-  },
-];
+import { fetchOpenTournaments } from '~/lib/tournaments';
+import { useAlert } from '~/providers/AlertProvider';
 
 export default function HomeScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const profile = useAuthStore((s) => s.profile);
   const user = useAuthStore((s) => s.user);
+  const tabBarHeight = useBottomTabBarHeight();
+  const { showAlert } = useAlert();
 
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -141,28 +38,58 @@ export default function HomeScreen() {
     return 'Good evening';
   };
 
+  const loadTournaments = useCallback(async () => {
+    setLoading(true);
+    try {
+      setTournaments(await fetchOpenTournaments());
+    } catch (err: any) {
+      showAlert({
+        type: 'danger',
+        title: 'Unable to load tournaments',
+        message: err?.message ?? 'Please try again.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [showAlert]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadTournaments();
+    }, [loadTournaments])
+  );
+
   const displayName = profile?.name ?? user?.email?.split('@')[0] ?? 'Player';
+  const openCount = tournaments.filter((t) => t.status === 'open').length;
+  const cityCount = new Set(tournaments.map((t) => t.city)).size;
+  const categoryCount = tournaments.reduce((sum, t) => sum + (t.categories?.length ?? 0), 0);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    await loadTournaments();
+    setRefreshing(false);
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: tabBarHeight + 16 }]}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
       >
-        {/* Top bar */}
         <View style={styles.topBar}>
           <View>
             <AppText variant="label" color={colors.textMuted}>
               {greeting()},
             </AppText>
             <AppText variant="title" weight="bold">
-              {displayName} 👋
+              {displayName}
             </AppText>
           </View>
           <TouchableOpacity style={styles.notifBtn}>
@@ -170,7 +97,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Search bar */}
         <TouchableOpacity
           style={styles.searchBar}
           onPress={() => router.push('/(app)/(tabs)/explore')}
@@ -182,41 +108,70 @@ export default function HomeScreen() {
           </AppText>
         </TouchableOpacity>
 
-        {/* Quick stats banner */}
         <View style={[styles.statsBanner, { backgroundColor: colors.primary }]}>
           <View style={styles.statItem}>
-            <AppText variant="hero" weight="bold" color="#fff">4</AppText>
-            <AppText variant="caption" color="rgba(255,255,255,0.8)">Open Events</AppText>
+            <AppText variant="hero" weight="bold" color="#fff">
+              {openCount}
+            </AppText>
+            <AppText variant="caption" color="rgba(255,255,255,0.8)">
+              Open Events
+            </AppText>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <AppText variant="hero" weight="bold" color="#fff">3</AppText>
-            <AppText variant="caption" color="rgba(255,255,255,0.8)">Cities</AppText>
+            <AppText variant="hero" weight="bold" color="#fff">
+              {cityCount}
+            </AppText>
+            <AppText variant="caption" color="rgba(255,255,255,0.8)">
+              Cities
+            </AppText>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <AppText variant="hero" weight="bold" color="#fff">8</AppText>
-            <AppText variant="caption" color="rgba(255,255,255,0.8)">Categories</AppText>
+            <AppText variant="hero" weight="bold" color="#fff">
+              {categoryCount}
+            </AppText>
+            <AppText variant="caption" color="rgba(255,255,255,0.8)">
+              Categories
+            </AppText>
           </View>
         </View>
 
-        {/* Upcoming tournaments */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <AppText variant="title" weight="semiBold">Upcoming Tournaments</AppText>
+            <AppText variant="title" weight="semiBold">
+              Upcoming Tournaments
+            </AppText>
             <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/explore')}>
-              <AppText variant="label" color={colors.primary} weight="medium">See all</AppText>
+              <AppText variant="label" color={colors.primary} weight="medium">
+                See all
+              </AppText>
             </TouchableOpacity>
           </View>
 
           <View style={styles.list}>
-            {MOCK_TOURNAMENTS.map((t) => (
-              <TournamentCard
-                key={t.id}
-                tournament={t}
-                onPress={() => {}}
-              />
-            ))}
+            {loading ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : tournaments.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Ionicons name="calendar-outline" size={28} color={colors.textMuted} />
+                <AppText variant="body" color={colors.textSecondary} center>
+                  No published tournaments yet.
+                </AppText>
+              </View>
+            ) : (
+              tournaments
+                .slice(0, 5)
+                .map((t) => (
+                  <TournamentCard
+                    key={t.id}
+                    tournament={t}
+                    onPress={() =>
+                      router.push({ pathname: '/(app)/tournament/[id]', params: { id: t.id } })
+                    }
+                  />
+                ))
+            )}
           </View>
         </View>
       </ScrollView>
@@ -230,9 +185,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flex: 1,
       backgroundColor: colors.background,
     },
-    scroll: {
-      paddingBottom: 24,
-    },
+    scroll: {},
     topBar: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -297,6 +250,15 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     list: {
       gap: 14,
+    },
+    emptyCard: {
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderRadius: 14,
+      borderWidth: 1,
+      gap: 8,
+      padding: 18,
     },
   });
 }

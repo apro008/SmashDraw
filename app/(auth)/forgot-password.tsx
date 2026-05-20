@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +8,7 @@ import { AppText } from '~/components/AppText';
 import { AppButton } from '~/components/AppButton';
 import { useAuthStore } from '~/store/useAuthStore';
 import { useTheme } from '~/hooks/useTheme';
+import { useAlert } from '~/providers/AlertProvider';
 
 export default function ForgotPassword() {
   const { colors } = useTheme();
@@ -14,70 +16,79 @@ export default function ForgotPassword() {
 
   const [email, setEmail] = useState('');
   const { resetPassword, loading, clearError } = useAuthStore();
+  const { showAlert } = useAlert();
 
   const handleReset = async () => {
     if (!email.trim()) {
-      Alert.alert('Email required', 'Please enter your email address.');
+      showAlert({ type: 'warning', title: 'Email required', message: 'Please enter your email address.' });
       return;
     }
     clearError();
     const success = await resetPassword(email.trim().toLowerCase());
     if (success) {
-      Alert.alert(
-        'Email sent',
-        'Check your inbox for password reset instructions.',
-        [{ text: 'OK', onPress: () => router.back() }]
-      );
+      showAlert({
+        type: 'success',
+        title: 'Email sent',
+        message: 'Check your inbox for password reset instructions.',
+        onConfirm: () => router.back(),
+      });
     }
   };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-        <Ionicons name="arrow-back" size={22} color={colors.text} />
-      </TouchableOpacity>
-
-      <View style={styles.content}>
-        <View style={styles.iconWrap}>
-          <Ionicons name="lock-open-outline" size={40} color={colors.primary} />
-        </View>
-
-        <AppText variant="headingLg" weight="bold" center>
-          Forgot Password?
-        </AppText>
-        <AppText variant="body" color={colors.textSecondary} center style={styles.subtitle}>
-          Enter your email and we'll send you a link to reset your password.
-        </AppText>
-
-        <View style={styles.field}>
-          <AppText variant="label" weight="medium" color={colors.textSecondary} style={styles.label}>
-            Email address
-          </AppText>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            placeholderTextColor={colors.textMuted}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="done"
-            onSubmitEditing={handleReset}
-          />
-        </View>
-
-        <AppButton title="Send Reset Link" onPress={handleReset} loading={loading} style={styles.btn} />
-
-        <TouchableOpacity onPress={() => router.back()} style={styles.backLink}>
-          <AppText variant="body" color={colors.textSecondary}>
-            Back to{' '}
-            <AppText variant="body" color={colors.primary} weight="semiBold">
-              Sign In
-            </AppText>
-          </AppText>
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        bottomOffset={16}
+      >
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
-      </View>
+
+        <View style={styles.content}>
+          <View style={styles.iconWrap}>
+            <Ionicons name="lock-open-outline" size={40} color={colors.primary} />
+          </View>
+
+          <AppText variant="headingLg" weight="bold" center>
+            Forgot Password?
+          </AppText>
+          <AppText variant="body" color={colors.textSecondary} center style={styles.subtitle}>
+            Enter your email and we'll send you a link to reset your password.
+          </AppText>
+
+          <View style={styles.field}>
+            <AppText variant="label" weight="medium" color={colors.textSecondary} style={styles.label}>
+              Email address
+            </AppText>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handleReset}
+            />
+          </View>
+
+          <AppButton title="Send Reset Link" onPress={handleReset} loading={loading} style={styles.btn} />
+
+          <TouchableOpacity onPress={() => router.back()} style={styles.backLink}>
+            <AppText variant="body" color={colors.textSecondary}>
+              Back to{' '}
+              <AppText variant="body" color={colors.primary} weight="semiBold">
+                Sign In
+              </AppText>
+            </AppText>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }
@@ -87,6 +98,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     safe: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    scroll: {
+      flexGrow: 1,
     },
     backBtn: {
       margin: 16,

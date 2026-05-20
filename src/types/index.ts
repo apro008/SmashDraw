@@ -1,6 +1,6 @@
 export type UserRole = 'player' | 'organizer' | 'admin';
 export type SkillLevel = 'beginner' | 'intermediate' | 'advanced' | 'open';
-export type TournamentStatus = 'draft' | 'open' | 'ongoing' | 'completed' | 'cancelled';
+export type TournamentStatus = 'draft' | 'open' | 'ongoing' | 'paused' | 'completed' | 'cancelled';
 export type CategoryName =
   | "Men's Singles"
   | "Women's Singles"
@@ -42,6 +42,9 @@ export interface Tournament {
   state: string;
   venue: string;
   venue_address: string | null;
+  venue_latitude: number | null;
+  venue_longitude: number | null;
+  venue_map_url: string | null;
   start_date: string;
   end_date: string;
   registration_deadline: string;
@@ -51,7 +54,10 @@ export interface Tournament {
   rules: string | null;
   status: TournamentStatus;
   contact_phone: string | null;
+  contact_phone_2: string | null;
+  contact_phone_3: string | null;
   contact_email: string | null;
+  payment_address: string | null;
   prize_pool: string | null;
   max_courts: number | null;
   created_at: string;
@@ -79,5 +85,30 @@ export interface Registration {
   notes: string | null;
   created_at: string;
   tournament?: Tournament;
+  category?: TournamentCategory;
+}
+
+export interface TournamentMatchResult {
+  id: string;
+  tournament_id: string;
+  category_id: string;
+  round: number;
+  match_number: number;
+  player1_id: string | null;
+  player2_id: string | null;
+  player1_name: string | null;
+  player2_name: string | null;
+  winner_id: string | null;
+  winner_name: string | null;
+  score: string | null;
+  player1_score: number | null;
+  player2_score: number | null;
+  result_notes: string | null;
+  prize_money_received: number | null;
+  status: 'scheduled' | 'live' | 'completed' | 'walkover';
+  scheduled_at: string | null;
+  completed_at: string | null;
+  court_number: number | null;
+  created_at: string;
   category?: TournamentCategory;
 }

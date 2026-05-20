@@ -10,15 +10,26 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.smashdraw.app"
+      "bundleIdentifier": "com.smashdraw.app",
+      "infoPlist": {
+        "NSCalendarsUsageDescription": "Allow SmashDraw to add tournament reminders to your calendar.",
+        "NSCalendarsFullAccessUsageDescription": "Allow SmashDraw to add tournament reminders to your calendar.",
+        "NSRemindersUsageDescription": "Allow SmashDraw to add tournament reminders.",
+        "NSRemindersFullAccessUsageDescription": "Allow SmashDraw to add tournament reminders."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#1A73E8"
       },
+      "notification": {
+        "icon": "./assets/images/notification-icon.png",
+        "color": "#1A73E8"
+      },
       "package": "com.smashdraw.app",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": ["android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR"]
     },
     "web": {
       "bundler": "metro",
@@ -47,10 +58,24 @@
           "backgroundColor": "#1A73E8"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow SmashDraw to add tournament reminders to your calendar.",
+          "remindersPermission": "Allow SmashDraw to add tournament reminders."
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "792652a8-2c98-453c-9480-376c6c04a158"
+      }
     }
   }
 }

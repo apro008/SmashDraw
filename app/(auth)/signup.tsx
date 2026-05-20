@@ -1,14 +1,6 @@
-import { useState, useMemo } from 'react';
-import {
-  View,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-} from 'react-native';
+import { useState, useMemo, useRef } from 'react';
+import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Link, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +8,7 @@ import { AppText } from '~/components/AppText';
 import { AppButton } from '~/components/AppButton';
 import { useAuthStore } from '~/store/useAuthStore';
 import { useTheme } from '~/hooks/useTheme';
+import { useAlert } from '~/providers/AlertProvider';
 
 export default function Signup() {
   const { colors } = useTheme();
@@ -27,168 +20,210 @@ export default function Signup() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const { signup, loading, error, clearError } = useAuthStore();
+  const { showAlert } = useAlert();
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const confirmPasswordRef = useRef<TextInput>(null);
 
   const handleSignup = async () => {
     if (!name.trim() || !email.trim() || !password || !confirmPassword) {
-      Alert.alert('Missing fields', 'Please fill in all fields.');
+      showAlert({
+        type: 'warning',
+        title: 'Missing fields',
+        message: 'Please fill in all fields.',
+      });
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert('Password mismatch', 'Passwords do not match.');
+      showAlert({
+        type: 'warning',
+        title: 'Password mismatch',
+        message: 'Passwords do not match.',
+      });
       return;
     }
     if (password.length < 6) {
-      Alert.alert('Weak password', 'Password must be at least 6 characters.');
+      showAlert({
+        type: 'warning',
+        title: 'Weak password',
+        message: 'Password must be at least 6 characters.',
+      });
       return;
     }
     clearError();
-    const success = await signup(email.trim().toLowerCase(), password, name.trim());
+    const success = await signup(email.trim().toLowerCase(), password, name.trim(), 'player');
     if (success) {
-      Alert.alert(
-        'Account created!',
-        'Check your email to verify your account, then sign in.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
-      );
+      showAlert({
+        type: 'success',
+        title: 'Account created!',
+        message: 'Check your email to verify your account, then sign in.',
+        onConfirm: () => router.replace('/(auth)/login'),
+      });
     }
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        bottomOffset={16}
       >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-              <Ionicons name="arrow-back" size={22} color="#fff" />
-            </TouchableOpacity>
-            <View style={styles.logoWrap}>
-              <Ionicons name="tennisball" size={36} color="#fff" />
-            </View>
-            <AppText variant="heading" weight="bold" color="#fff" center>
-              Create Account
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </TouchableOpacity>
+          <View style={styles.logoWrap}>
+            <Ionicons name="tennisball" size={36} color="#fff" />
+          </View>
+          <AppText variant="heading" weight="bold" color="#fff" center>
+            Create Account
+          </AppText>
+          <AppText variant="body" color="rgba(255,255,255,0.75)" center>
+            Join the badminton community
+          </AppText>
+        </View>
+
+        {/* Form card */}
+        <View style={styles.card}>
+          {/* Full name */}
+          <View style={styles.field}>
+            <AppText
+              variant="label"
+              weight="medium"
+              color={colors.textSecondary}
+              style={styles.label}
+            >
+              Full Name
             </AppText>
-            <AppText variant="body" color="rgba(255,255,255,0.75)" center>
-              Join the badminton community
-            </AppText>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="Prakash Padukone"
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="words"
+              returnKeyType="next"
+              onSubmitEditing={() => emailRef.current?.focus()}
+              blurOnSubmit={false}
+            />
           </View>
 
-          {/* Form card */}
-          <View style={styles.card}>
-            {/* Full name */}
-            <View style={styles.field}>
-              <AppText variant="label" weight="medium" color={colors.textSecondary} style={styles.label}>
-                Full Name
-              </AppText>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="Prakash Padukone"
-                placeholderTextColor={colors.textMuted}
-                autoCapitalize="words"
-                returnKeyType="next"
-              />
-            </View>
+          {/* Email */}
+          <View style={styles.field}>
+            <AppText
+              variant="label"
+              weight="medium"
+              color={colors.textSecondary}
+              style={styles.label}
+            >
+              Email
+            </AppText>
+            <TextInput
+              ref={emailRef}
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              blurOnSubmit={false}
+            />
+          </View>
 
-            {/* Email */}
-            <View style={styles.field}>
-              <AppText variant="label" weight="medium" color={colors.textSecondary} style={styles.label}>
-                Email
-              </AppText>
+          {/* Password */}
+          <View style={styles.field}>
+            <AppText
+              variant="label"
+              weight="medium"
+              color={colors.textSecondary}
+              style={styles.label}
+            >
+              Password
+            </AppText>
+            <View>
               <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@example.com"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="next"
-              />
-            </View>
-
-            {/* Password */}
-            <View style={styles.field}>
-              <AppText variant="label" weight="medium" color={colors.textSecondary} style={styles.label}>
-                Password
-              </AppText>
-              <View>
-                <TextInput
-                  style={[styles.input, { paddingRight: 48 }]}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Min. 6 characters"
-                  placeholderTextColor={colors.textMuted}
-                  secureTextEntry={!showPassword}
-                  returnKeyType="next"
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeBtn}
-                >
-                  <Ionicons
-                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                    size={20}
-                    color={colors.textMuted}
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Confirm Password */}
-            <View style={styles.field}>
-              <AppText variant="label" weight="medium" color={colors.textSecondary} style={styles.label}>
-                Confirm Password
-              </AppText>
-              <TextInput
-                style={styles.input}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                placeholder="••••••••"
+                ref={passwordRef}
+                style={[styles.input, { paddingRight: 48 }]}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Min. 6 characters"
                 placeholderTextColor={colors.textMuted}
                 secureTextEntry={!showPassword}
-                returnKeyType="done"
-                onSubmitEditing={handleSignup}
+                returnKeyType="next"
+                onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+                blurOnSubmit={false}
               />
-            </View>
-
-            {error ? (
-              <View style={styles.errorBox}>
-                <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
-                <AppText variant="label" color={colors.danger} style={{ marginLeft: 6, flex: 1 }}>
-                  {error}
-                </AppText>
-              </View>
-            ) : null}
-
-            <AppButton
-              title="Create Account"
-              onPress={handleSignup}
-              loading={loading}
-              style={styles.btn}
-            />
-
-            <View style={styles.loginRow}>
-              <AppText variant="body" color={colors.textSecondary}>
-                Already have an account?{' '}
-              </AppText>
-              <Link href="/(auth)/login">
-                <AppText variant="body" color={colors.primary} weight="semiBold">
-                  Sign in
-                </AppText>
-              </Link>
+              <TouchableOpacity
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeBtn}
+              >
+                <Ionicons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color={colors.textMuted}
+                />
+              </TouchableOpacity>
             </View>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+
+          {/* Confirm Password */}
+          <View style={styles.field}>
+            <AppText
+              variant="label"
+              weight="medium"
+              color={colors.textSecondary}
+              style={styles.label}
+            >
+              Confirm Password
+            </AppText>
+            <TextInput
+              ref={confirmPasswordRef}
+              style={styles.input}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="••••••••"
+              placeholderTextColor={colors.textMuted}
+              secureTextEntry={!showPassword}
+              returnKeyType="done"
+              onSubmitEditing={handleSignup}
+            />
+          </View>
+
+          {error ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
+              <AppText variant="label" color={colors.danger} style={{ marginLeft: 6, flex: 1 }}>
+                {error}
+              </AppText>
+            </View>
+          ) : null}
+
+          <AppButton
+            title="Create Account"
+            onPress={handleSignup}
+            loading={loading}
+            style={styles.btn}
+          />
+
+          <View style={styles.loginRow}>
+            <AppText variant="body" color={colors.textSecondary}>
+              Already have an account?{' '}
+            </AppText>
+            <Link href="/(auth)/login">
+              <AppText variant="body" color={colors.primary} weight="semiBold">
+                Sign in
+              </AppText>
+            </Link>
+          </View>
+        </View>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }
