@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { FlatList, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { AppText } from '~/components/AppText';
+import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { TournamentCard } from '~/components/TournamentCard';
 import { useTheme } from '~/hooks/useTheme';
 import { useAuthStore } from '~/store/useAuthStore';
@@ -56,8 +57,8 @@ export default function MyTournamentsScreen() {
       </View>
 
       {loading ? (
-        <View style={[styles.empty, { paddingBottom: tabBarHeight + 40 }]}>
-          <ActivityIndicator color={colors.primary} />
+        <View style={[styles.list, { paddingBottom: tabBarHeight + 8 }]}>
+          <SkeletonLoader count={4} variant="list" />
         </View>
       ) : joined.length === 0 ? (
         <View style={[styles.empty, { paddingBottom: tabBarHeight + 40 }]}>
@@ -88,6 +89,17 @@ export default function MyTournamentsScreen() {
               onPress={() =>
                 router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } })
               }
+              menuActions={[
+                {
+                  icon: 'stats-chart-outline',
+                  label: 'Show Result',
+                  onPress: () =>
+                    router.push({
+                      pathname: '/(app)/tournament-result/[id]',
+                      params: { id: item.id },
+                    }),
+                },
+              ]}
             />
           )}
           contentContainerStyle={[styles.list, { paddingBottom: tabBarHeight + 8 }]}

@@ -181,3 +181,8 @@ Start with real tournament browsing:
 4. Keep the same UI components so the change stays focused.
 
 This unlocks the rest of the player flow and makes future features easier to test against real data.
+
+
+add skeleton loader, logo as boot splash, 
+add show result for org also and in that screen org can update the result.
+show graph and stat on dashboard

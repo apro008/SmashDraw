@@ -4,15 +4,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '~/components/AppButton';
 import { AppText } from '~/components/AppText';
 import { isDoublesCategory } from '~/constants/TournamentCategories';
-import { saveTournamentResult, TournamentRegistrationDetails } from '~/lib/tournaments';
+import {
+  saveTournamentResult,
+  TournamentRegistrationDetails,
+  updateTournamentResult,
+} from '~/lib/tournaments';
 import { useAlert } from '~/providers/AlertProvider';
 import { useAuthStore } from '~/store/useAuthStore';
-import { Tournament, TournamentCategory } from '~/types';
+import { Tournament, TournamentCategory, TournamentMatchResult } from '~/types';
 import { useTheme } from '~/hooks/useTheme';
 
 interface ResultEntrySheetProps {
   registrations: TournamentRegistrationDetails[];
   tournament: Tournament;
+  initialResult?: TournamentMatchResult | null;
   visible: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -27,6 +32,7 @@ interface Contestant {
 }
 
 export function ResultEntrySheet({
+  initialResult,
   onClose,
   onSaved,
   registrations,
@@ -38,7 +44,7 @@ export function ResultEntrySheet({
   const { showAlert } = useAlert();
   const user = useAuthStore((s) => s.user);
 
-  const categories = tournament.categories ?? [];
+  const categories = useMemo(() => tournament.categories ?? [], [tournament.categories]);
   const [category, setCategory] = useState<TournamentCategory | null>(categories[0] ?? null);
   const contestants = useMemo(
     () => buildContestants(registrations, category?.id ?? null),
@@ -49,29 +55,42 @@ export function ResultEntrySheet({
   const [winnerSide, setWinnerSide] = useState<1 | 2>(1);
   const [player1Score, setPlayer1Score] = useState('');
   const [player2Score, setPlayer2Score] = useState('');
+  const [scoreText, setScoreText] = useState('');
   const [prizeMoney, setPrizeMoney] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const isEditing = !!initialResult;
 
   useEffect(() => {
     if (!visible) return;
-    const nextCategory = categories[0] ?? null;
+    const nextCategory =
+      categories.find((item) => item.id === initialResult?.category_id) ?? categories[0] ?? null;
     setCategory(nextCategory);
     const nextContestants = buildContestants(registrations, nextCategory?.id ?? null);
-    setPlayer1Id(nextContestants[0]?.id ?? '');
-    setPlayer2Id(nextContestants[1]?.id ?? '');
-    setWinnerSide(1);
-    setPlayer1Score('');
-    setPlayer2Score('');
-    setPrizeMoney('');
-    setNotes('');
-  }, [categories, registrations, visible]);
+    const nextPlayer1Id =
+      findContestantId(nextContestants, initialResult?.player1_id, initialResult?.player1_name) ??
+      nextContestants[0]?.id ??
+      '';
+    const nextPlayer2Id =
+      findContestantId(nextContestants, initialResult?.player2_id, initialResult?.player2_name) ??
+      nextContestants.find((item) => item.id !== nextPlayer1Id)?.id ??
+      '';
+    setPlayer1Id(nextPlayer1Id);
+    setPlayer2Id(nextPlayer2Id);
+    setWinnerSide(initialResult?.winner_id === initialResult?.player2_id ? 2 : 1);
+    setPlayer1Score(initialResult?.player1_score?.toString() ?? '');
+    setPlayer2Score(initialResult?.player2_score?.toString() ?? '');
+    setScoreText(initialResult?.score ?? '');
+    setPrizeMoney(initialResult?.prize_money_received?.toString() ?? '');
+    setNotes(initialResult?.result_notes ?? '');
+  }, [categories, initialResult, registrations, visible]);
 
   useEffect(() => {
+    if (initialResult) return;
     setPlayer1Id(contestants[0]?.id ?? '');
     setPlayer2Id(contestants[1]?.id ?? '');
     setWinnerSide(1);
-  }, [contestants]);
+  }, [contestants, initialResult]);
 
   const player1 = contestants.find((item) => item.id === player1Id) ?? null;
   const player2 = contestants.find((item) => item.id === player2Id) ?? null;
@@ -96,7 +115,7 @@ export function ResultEntrySheet({
 
     setSaving(true);
     try {
-      await saveTournamentResult({
+      const payload = {
         tournamentId: tournament.id,
         categoryId: category.id,
         player1Id: player1.userId,
@@ -107,14 +126,22 @@ export function ResultEntrySheet({
         winnerName: winner.name,
         player1Score: score1,
         player2Score: score2,
+        scoreText: scoreText.trim() || undefined,
         prizeMoneyReceived: prize,
         notes: notes.trim() || null,
         uploadedBy: user.id,
-      });
+      };
+      if (initialResult) {
+        await updateTournamentResult(initialResult.id, payload);
+      } else {
+        await saveTournamentResult(payload);
+      }
       showAlert({
         type: 'success',
-        title: 'Result uploaded',
-        message: 'Players can now view this match result.',
+        title: initialResult ? 'Result updated' : 'Result uploaded',
+        message: initialResult
+          ? 'The latest scorecard is now visible to players.'
+          : 'Players can now view this match result.',
       });
       onSaved();
       onClose();
@@ -136,10 +163,12 @@ export function ResultEntrySheet({
         <View style={styles.header}>
           <View>
             <AppText variant="title" weight="bold">
-              Finish Match
+              {isEditing ? 'Update Result' : 'Finish Match'}
             </AppText>
             <AppText variant="caption" color={colors.textSecondary}>
-              Upload score, winner, and prize details
+              {isEditing
+                ? 'Edit score, winner, and prize details'
+                : 'Upload score, winner, and prize details'}
             </AppText>
           </View>
           <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeButton}>
@@ -258,6 +287,14 @@ export function ResultEntrySheet({
 
           <Field
             colors={colors}
+            label="Final score"
+            onChangeText={setScoreText}
+            placeholder={`${score1 || 0}-${score2 || 0}`}
+            styles={styles}
+            value={scoreText}
+          />
+          <Field
+            colors={colors}
             keyboardType="number-pad"
             label="Prize money received"
             onChangeText={setPrizeMoney}
@@ -280,7 +317,7 @@ export function ResultEntrySheet({
             loading={saving}
             onPress={handleSave}
             style={styles.submitButton}
-            title="Upload Result"
+            title={isEditing ? 'Update Result' : 'Upload Result'}
           />
         </ScrollView>
       </View>
@@ -382,6 +419,13 @@ function Field({
         value={value}
       />
     </View>
+  );
+}
+
+function findContestantId(contestants: Contestant[], userId?: string | null, name?: string | null) {
+  return (
+    contestants.find((item) => item.userId === userId)?.id ??
+    contestants.find((item) => item.name === name)?.id
   );
 }
 

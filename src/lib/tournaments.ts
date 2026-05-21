@@ -235,6 +235,31 @@ export async function saveTournamentResult(input: SaveTournamentResultInput) {
   if (error) throw error;
 }
 
+export async function updateTournamentResult(matchId: string, input: SaveTournamentResultInput) {
+  const { error } = await supabase
+    .from('matches')
+    .update({
+      category_id: input.categoryId,
+      player1_id: input.player1Id,
+      player2_id: input.player2Id,
+      player1_name: input.player1Name,
+      player2_name: input.player2Name,
+      winner_id: input.winnerId,
+      winner_name: input.winnerName,
+      player1_score: input.player1Score,
+      player2_score: input.player2Score,
+      score: input.scoreText ?? `${input.player1Score}-${input.player2Score}`,
+      prize_money_received: input.prizeMoneyReceived,
+      result_notes: input.notes,
+      result_uploaded_by: input.uploadedBy,
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', matchId);
+
+  if (error) throw error;
+}
+
 function sortTournamentCategories(tournament: Tournament) {
   return {
     ...tournament,

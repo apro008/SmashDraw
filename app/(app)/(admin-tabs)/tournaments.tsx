@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, View, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { AppText } from '~/components/AppText';
+import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { TournamentCard } from '~/components/TournamentCard';
 import { useTheme } from '~/hooks/useTheme';
 import { Tournament } from '~/types';
@@ -126,8 +127,8 @@ export default function AdminTournamentsScreen() {
       </View>
 
       {loading ? (
-        <View style={[styles.empty, { paddingBottom: tabBarHeight + 40 }]}>
-          <ActivityIndicator color={colors.primary} />
+        <View style={[styles.list, { paddingBottom: tabBarHeight + 8 }]}>
+          <SkeletonLoader count={4} variant="list" />
         </View>
       ) : filtered.length === 0 ? (
         <View style={[styles.empty, { paddingBottom: tabBarHeight + 40 }]}>

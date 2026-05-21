@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, View, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText } from '~/components/AppText';
 import { AppButton } from '~/components/AppButton';
+import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { useTheme } from '~/hooks/useTheme';
+import { CATEGORY_TYPE } from '~/components/TournamentCard';
 import { Tournament, TournamentCategory, TournamentMatchResult, TournamentStatus } from '~/types';
 import { addCalendarEvent } from '~/lib/calendar';
 import { useAlert } from '~/providers/AlertProvider';
@@ -30,13 +32,16 @@ import {
 
 type RegistrationStatusCounts = Record<'approved' | 'pending' | 'rejected' | 'waitlisted', number>;
 
-const STATUS_CONFIG: Record<TournamentStatus, { label: string; color: string; bg: string }> = {
-  open: { label: 'Open', color: '#16A34A', bg: '#DCFCE7' },
-  ongoing: { label: 'Live', color: '#D97706', bg: '#FEF3C7' },
-  paused: { label: 'Paused', color: '#7C3AED', bg: '#EDE9FE' },
-  completed: { label: 'Ended', color: '#6B7280', bg: '#F3F4F6' },
-  draft: { label: 'Draft', color: '#6B7280', bg: '#F3F4F6' },
-  cancelled: { label: 'Cancelled', color: '#DC2626', bg: '#FEE2E2' },
+const STATUS_CONFIG: Record<
+  TournamentStatus,
+  { label: string; color: string; bg: string; dot?: boolean }
+> = {
+  open: { label: 'Open', color: '#fff', bg: '#16A34A' },
+  ongoing: { label: 'Live', color: '#fff', bg: '#EA580C', dot: true },
+  paused: { label: 'Paused', color: '#fff', bg: '#7C3AED' },
+  completed: { label: 'Ended', color: '#4B5563', bg: '#F3F4F6' },
+  draft: { label: 'Draft', color: '#fff', bg: '#374151' },
+  cancelled: { label: 'Cancelled', color: '#fff', bg: '#DC2626' },
 };
 
 const REGISTRATION_STATUS_CONFIG = {
@@ -46,12 +51,25 @@ const REGISTRATION_STATUS_CONFIG = {
   waitlisted: { label: 'Waitlisted', color: '#7C3AED', bg: '#EDE9FE' },
 };
 
-const GRADIENT_COLORS = ['#1A73E8', '#0D47A1', '#7C3AED', '#BE185D', '#065F46', '#B45309'];
+const HASH_COLORS = ['#1A73E8', '#0D47A1', '#7C3AED', '#BE185D', '#065F46', '#B45309'];
+
+const CATEGORY_ABBR: Record<string, string> = {
+  "Men's Singles": 'MS',
+  "Women's Singles": 'WS',
+  "Men's Doubles": 'MD',
+  "Women's Doubles": 'WD',
+  'Mixed Doubles': 'XD',
+  "Boys' Singles": 'BS',
+  "Girls' Singles": 'GS',
+  "Boys' Under-15": 'B15',
+  "Girls' Under-15": 'G15',
+  'Veterans Singles': 'VET',
+};
 
 function hashColor(str: string) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  return GRADIENT_COLORS[Math.abs(hash) % GRADIENT_COLORS.length];
+  return HASH_COLORS[Math.abs(hash) % HASH_COLORS.length];
 }
 
 function formatDate(dateStr: string) {
@@ -62,6 +80,93 @@ function formatDate(dateStr: string) {
   });
 }
 
+function formatShortDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function getCategoryColor(name: string) {
+  return CATEGORY_TYPE[name]?.color ?? '#1A73E8';
+}
+
+function getCategoryAbbr(name: string) {
+  return (
+    CATEGORY_ABBR[name] ??
+    name
+      .split(' ')
+      .map((w) => w[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 3)
+  );
+}
+
+// ─── Live dot (pulsing indicator for ongoing) ───────────────────────────────
+function LiveDot({ color = '#fff' }: { color?: string }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.2, duration: 550, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 550, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [pulse]);
+  return (
+    <Animated.View
+      style={{
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: color,
+        opacity: pulse,
+        marginRight: 4,
+      }}
+    />
+  );
+}
+
+// ─── Quick stat chip ─────────────────────────────────────────────────────────
+function StatChip({
+  icon,
+  label,
+  value,
+  colors,
+  highlight,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  colors: any;
+  highlight?: boolean;
+}) {
+  return (
+    <View
+      style={{
+        backgroundColor: highlight ? colors.primaryLight : colors.surface,
+        borderRadius: 14,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        alignItems: 'center',
+        gap: 4,
+        minWidth: 90,
+        borderWidth: 1,
+        borderColor: highlight ? colors.primary + '40' : colors.border,
+      }}
+    >
+      <Ionicons name={icon} size={16} color={highlight ? colors.primary : colors.textMuted} />
+      <AppText variant="xs" color={colors.textMuted}>
+        {label}
+      </AppText>
+      <AppText variant="label" weight="semiBold" color={highlight ? colors.primary : colors.text}>
+        {value}
+      </AppText>
+    </View>
+  );
+}
+
+// ─── Slots bar ───────────────────────────────────────────────────────────────
 function SlotsBar({
   categoryName,
   colors,
@@ -95,11 +200,11 @@ function SlotsBar({
         </AppText>
       </View>
       <View
-        style={{ height: 9, backgroundColor: softColor, borderRadius: 999, overflow: 'hidden' }}
+        style={{ height: 8, backgroundColor: softColor, borderRadius: 999, overflow: 'hidden' }}
       >
         <View
           style={{
-            height: 9,
+            height: 8,
             width: `${pct * 100}%` as any,
             backgroundColor: barColor,
             borderRadius: 999,
@@ -114,9 +219,9 @@ function SlotsBar({
           <StatusMiniPill color="#16A34A" label={`${counts.approved} approved`} />
           <StatusMiniPill color="#D97706" label={`${counts.pending} pending`} />
           <StatusMiniPill color="#DC2626" label={`${counts.rejected} rejected`} />
-          {counts.waitlisted > 0 ? (
+          {counts.waitlisted > 0 && (
             <StatusMiniPill color="#7C3AED" label={`${counts.waitlisted} waitlisted`} />
-          ) : null}
+          )}
         </View>
       ) : null}
     </View>
@@ -141,6 +246,7 @@ function StatusMiniPill({ color, label }: { color: string; label: string }) {
   );
 }
 
+// ─── Category row ─────────────────────────────────────────────────────────────
 function CategoryRow({
   cat,
   colors,
@@ -152,43 +258,188 @@ function CategoryRow({
   counts?: RegistrationStatusCounts;
   styles: any;
 }) {
+  const catColor = getCategoryColor(cat.name);
+  const abbr = getCategoryAbbr(cat.name);
+
   return (
     <View style={styles.catRow}>
-      <View style={styles.catTop}>
-        <AppText variant="bodyLg" weight="semiBold">
-          {cat.name}
-        </AppText>
-        <AppText variant="title" weight="bold" color={colors.primary}>
-          ₹{cat.entry_fee}
-        </AppText>
-      </View>
-      <View style={styles.catMeta}>
-        <View style={[styles.skillBadge, { backgroundColor: colors.surface }]}>
-          <AppText variant="xs" weight="medium" color={colors.textSecondary}>
-            {cat.skill_level.charAt(0).toUpperCase() + cat.skill_level.slice(1)}
-          </AppText>
-        </View>
-        {cat.prize && (
-          <View style={styles.prizeBadge}>
-            <Ionicons name="gift-outline" size={11} color={colors.textMuted} />
-            <AppText variant="xs" color={colors.textMuted}>
-              {' '}
-              {cat.prize}
+      <View style={[styles.catAccentStrip, { backgroundColor: catColor }]} />
+      <View style={styles.catInner}>
+        <View style={styles.catTop}>
+          <View style={{ flex: 1 }}>
+            <View style={styles.catNameRow}>
+              <View style={[styles.catAbbrChip, { backgroundColor: catColor + '20' }]}>
+                <AppText variant="xs" weight="bold" color={catColor}>
+                  {abbr}
+                </AppText>
+              </View>
+              <AppText variant="bodyLg" weight="semiBold" style={{ flex: 1 }} numberOfLines={1}>
+                {cat.name}
+              </AppText>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.catFeeChip,
+              { backgroundColor: catColor + '18', borderColor: catColor + '45' },
+            ]}
+          >
+            <AppText variant="label" weight="bold" color={catColor}>
+              ₹{cat.entry_fee}
             </AppText>
           </View>
-        )}
+        </View>
+        <View style={styles.catMetaRow}>
+          <View style={[styles.skillBadge, { borderColor: colors.border }]}>
+            <Ionicons name="stats-chart-outline" size={10} color={colors.textMuted} />
+            <AppText variant="xs" weight="medium" color={colors.textSecondary}>
+              {cat.skill_level.charAt(0).toUpperCase() + cat.skill_level.slice(1)}
+            </AppText>
+          </View>
+          {cat.prize ? (
+            <View style={styles.catPrizeBadge}>
+              <Ionicons name="trophy-outline" size={10} color="#B45309" />
+              <AppText variant="xs" color="#B45309">
+                {cat.prize}
+              </AppText>
+            </View>
+          ) : null}
+        </View>
+        <SlotsBar
+          categoryName={cat.name}
+          counts={counts}
+          current={cat.current_players}
+          max={cat.max_players}
+          colors={colors}
+        />
       </View>
-      <SlotsBar
-        categoryName={cat.name}
-        counts={counts}
-        current={cat.current_players}
-        max={cat.max_players}
-        colors={colors}
-      />
     </View>
   );
 }
 
+// ─── Result card (match rows layout) ─────────────────────────────────────────
+function ResultCard({
+  colors,
+  result,
+  styles,
+}: {
+  colors: any;
+  result: TournamentMatchResult;
+  styles: any;
+}) {
+  const p1Score = result.player1_score ?? 0;
+  const p2Score = result.player2_score ?? 0;
+  const p1Won = !!result.winner_name && result.winner_name === result.player1_name;
+  const p2Won = !!result.winner_name && result.winner_name === result.player2_name;
+  const catColor = getCategoryColor(result.category?.name ?? '');
+  const abbr = result.category?.name ? getCategoryAbbr(result.category.name) : '?';
+
+  return (
+    <View style={styles.resultCard}>
+      <View style={[styles.resultAccentStrip, { backgroundColor: catColor }]} />
+      <View style={styles.resultInner}>
+        {/* Header */}
+        <View style={styles.resultHeader}>
+          <View
+            style={[
+              styles.resultCatChip,
+              { backgroundColor: catColor + '20', borderColor: catColor + '45' },
+            ]}
+          >
+            <AppText variant="xs" weight="bold" color={catColor}>
+              {abbr}
+            </AppText>
+          </View>
+          <AppText variant="xs" color={colors.textMuted} style={{ flex: 1 }} numberOfLines={1}>
+            {result.category?.name ?? 'Match'} · #{result.match_number}
+          </AppText>
+          {result.completed_at ? (
+            <AppText variant="xs" color={colors.textMuted}>
+              {formatShortDate(result.completed_at)}
+            </AppText>
+          ) : null}
+        </View>
+
+        {/* Stacked player rows */}
+        <View style={styles.matchRows}>
+          <View style={[styles.matchRow, p1Won && styles.matchRowWon]}>
+            <View style={styles.matchRowLeft}>
+              {p1Won ? (
+                <Ionicons name="trophy" size={13} color="#B45309" />
+              ) : (
+                <View style={{ width: 13 }} />
+              )}
+              <AppText
+                variant="label"
+                weight={p1Won ? 'semiBold' : 'regular'}
+                numberOfLines={1}
+                style={{ flex: 1 }}
+                color={p1Won ? colors.text : colors.textSecondary}
+              >
+                {result.player1_name ?? 'Side A'}
+              </AppText>
+            </View>
+            <AppText style={[styles.matchScore, { color: p1Won ? '#B45309' : colors.textMuted }]}>
+              {p1Score}
+            </AppText>
+          </View>
+
+          <View style={styles.matchDivider} />
+
+          <View style={[styles.matchRow, p2Won && styles.matchRowWon]}>
+            <View style={styles.matchRowLeft}>
+              {p2Won ? (
+                <Ionicons name="trophy" size={13} color="#B45309" />
+              ) : (
+                <View style={{ width: 13 }} />
+              )}
+              <AppText
+                variant="label"
+                weight={p2Won ? 'semiBold' : 'regular'}
+                numberOfLines={1}
+                style={{ flex: 1 }}
+                color={p2Won ? colors.text : colors.textSecondary}
+              >
+                {result.player2_name ?? 'Side B'}
+              </AppText>
+            </View>
+            <AppText style={[styles.matchScore, { color: p2Won ? '#B45309' : colors.textMuted }]}>
+              {p2Score}
+            </AppText>
+          </View>
+        </View>
+
+        {/* Footer */}
+        {result.score || result.prize_money_received || result.result_notes ? (
+          <View style={styles.resultFooter}>
+            {result.score ? (
+              <View style={styles.resultScorePill}>
+                <AppText variant="xs" color={colors.textSecondary} weight="semiBold">
+                  {result.score}
+                </AppText>
+              </View>
+            ) : null}
+            {result.prize_money_received ? (
+              <View style={styles.resultPrizePill}>
+                <Ionicons name="cash-outline" size={11} color="#B45309" />
+                <AppText variant="xs" weight="semiBold" color="#B45309">
+                  ₹{result.prize_money_received}
+                </AppText>
+              </View>
+            ) : null}
+            {result.result_notes ? (
+              <AppText variant="xs" color={colors.textMuted} numberOfLines={1} style={{ flex: 1 }}>
+                {result.result_notes}
+              </AppText>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+// ─── Registration row ─────────────────────────────────────────────────────────
 function parseRegistrationNotes(notes: string | null) {
   if (!notes) return {};
   try {
@@ -205,35 +456,6 @@ function parseRegistrationNotes(notes: string | null) {
   }
 }
 
-function getRegistrationCountsByCategory(registrations: TournamentRegistrationDetails[]) {
-  const counts = new Map<string, RegistrationStatusCounts>();
-  registrations.forEach((registration) => {
-    const current = counts.get(registration.category_id) ?? {
-      approved: 0,
-      pending: 0,
-      rejected: 0,
-      waitlisted: 0,
-    };
-    current[registration.status] += 1;
-    counts.set(registration.category_id, current);
-  });
-  return counts;
-}
-
-function getCategoryStatusCounts(
-  countsByCategory: Map<string, RegistrationStatusCounts>,
-  category: TournamentCategory
-) {
-  return (
-    countsByCategory.get(category.id) ?? {
-      approved: category.current_players,
-      pending: 0,
-      rejected: 0,
-      waitlisted: 0,
-    }
-  );
-}
-
 function RegistrationRow({
   registration,
   onStatusChange,
@@ -242,7 +464,7 @@ function RegistrationRow({
   styles,
 }: {
   registration: TournamentRegistrationDetails;
-  onStatusChange?: (registrationId: string, status: 'approved' | 'rejected' | 'waitlisted') => void;
+  onStatusChange?: (id: string, status: 'approved' | 'rejected' | 'waitlisted') => void;
   statusLoading?: boolean;
   colors: any;
   styles: any;
@@ -252,10 +474,12 @@ function RegistrationRow({
   const phone = details.phone ?? registration.player?.phone;
   const email = details.email ?? registration.player?.email;
   const statusCfg = REGISTRATION_STATUS_CONFIG[registration.status];
+  const catColor = getCategoryColor(registration.category?.name ?? '');
 
   return (
     <View style={styles.registrationRow}>
       <View style={styles.registrationTop}>
+        <View style={[styles.registrationCatDot, { backgroundColor: catColor }]} />
         <View style={{ flex: 1 }}>
           <AppText variant="bodyLg" weight="semiBold">
             {playerName}
@@ -264,7 +488,7 @@ function RegistrationRow({
             {registration.category?.name ?? 'Category'}
           </AppText>
         </View>
-        <View style={[styles.registrationStatus, { backgroundColor: statusCfg.bg }]}>
+        <View style={[styles.registrationStatusPill, { backgroundColor: statusCfg.bg }]}>
           <AppText variant="xs" weight="semiBold" color={statusCfg.color}>
             {statusCfg.label}
           </AppText>
@@ -302,7 +526,7 @@ function RegistrationRow({
               onPress={() => onStatusChange(registration.id, 'approved')}
               style={[styles.statusAction, styles.approveAction, statusLoading && styles.disabled]}
             >
-              <Ionicons name="checkmark" size={14} color="#fff" />
+              <Ionicons name="checkmark" size={13} color="#fff" />
               <AppText variant="xs" weight="semiBold" color="#fff">
                 Approve
               </AppText>
@@ -315,7 +539,7 @@ function RegistrationRow({
               onPress={() => onStatusChange(registration.id, 'waitlisted')}
               style={[styles.statusAction, styles.waitlistAction, statusLoading && styles.disabled]}
             >
-              <Ionicons name="time-outline" size={14} color="#7C3AED" />
+              <Ionicons name="time-outline" size={13} color="#7C3AED" />
               <AppText variant="xs" weight="semiBold" color="#7C3AED">
                 Waitlist
               </AppText>
@@ -328,7 +552,7 @@ function RegistrationRow({
               onPress={() => onStatusChange(registration.id, 'rejected')}
               style={[styles.statusAction, styles.rejectAction, statusLoading && styles.disabled]}
             >
-              <Ionicons name="close" size={14} color="#DC2626" />
+              <Ionicons name="close" size={13} color="#DC2626" />
               <AppText variant="xs" weight="semiBold" color="#DC2626">
                 Reject
               </AppText>
@@ -340,128 +564,146 @@ function RegistrationRow({
   );
 }
 
-function ResultCard({
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function groupRegistrationsByCategory(regs: TournamentRegistrationDetails[]) {
+  const map = new Map<
+    string,
+    { catId: string; catName: string; items: TournamentRegistrationDetails[] }
+  >();
+  for (const r of regs) {
+    const key = r.category_id;
+    const name = r.category?.name ?? 'Unknown';
+    if (!map.has(key)) map.set(key, { catId: key, catName: name, items: [] });
+    map.get(key)!.items.push(r);
+  }
+  return Array.from(map.values());
+}
+
+function getRegistrationCountsByCategory(registrations: TournamentRegistrationDetails[]) {
+  const counts = new Map<string, RegistrationStatusCounts>();
+  registrations.forEach((r) => {
+    const current = counts.get(r.category_id) ?? {
+      approved: 0,
+      pending: 0,
+      rejected: 0,
+      waitlisted: 0,
+    };
+    current[r.status] += 1;
+    counts.set(r.category_id, current);
+  });
+  return counts;
+}
+
+function getCategoryStatusCounts(
+  countsByCategory: Map<string, RegistrationStatusCounts>,
+  category: TournamentCategory
+) {
+  return (
+    countsByCategory.get(category.id) ?? {
+      approved: category.current_players,
+      pending: 0,
+      rejected: 0,
+      waitlisted: 0,
+    }
+  );
+}
+
+// ─── Category registration section (collapsible) ─────────────────────────────
+function CategoryRegistrationSection({
+  catName,
+  items,
+  onStatusChange,
+  updatingId,
   colors,
-  result,
   styles,
+  isFirst,
 }: {
+  catName: string;
+  items: TournamentRegistrationDetails[];
+  onStatusChange?: (id: string, status: 'approved' | 'rejected' | 'waitlisted') => void;
+  updatingId: string | null;
   colors: any;
-  result: TournamentMatchResult;
   styles: any;
+  isFirst: boolean;
 }) {
-  const player1Score = result.player1_score ?? 0;
-  const player2Score = result.player2_score ?? 0;
-  const maxScore = Math.max(player1Score, player2Score, 1);
-  const player1Won = result.winner_name === result.player1_name;
-  const player2Won = result.winner_name === result.player2_name;
+  const [open, setOpen] = useState(true);
+  const catColor = getCategoryColor(catName);
+  const abbr = getCategoryAbbr(catName);
+  const approved = items.filter((r) => r.status === 'approved').length;
+  const pending = items.filter((r) => r.status === 'pending').length;
+  const waitlisted = items.filter((r) => r.status === 'waitlisted').length;
 
   return (
-    <View style={styles.resultCard}>
-      <View style={styles.resultHeader}>
-        <View style={{ flex: 1 }}>
-          <AppText variant="bodyLg" weight="semiBold">
-            {result.category?.name ?? 'Match Result'}
-          </AppText>
-          <AppText variant="caption" color={colors.textMuted}>
-            Match #{result.match_number}
-            {result.completed_at ? ` • ${formatDate(result.completed_at)}` : ''}
-          </AppText>
-        </View>
-        <View style={styles.winnerBadge}>
-          <Ionicons name="trophy-outline" size={13} color="#B45309" />
-          <AppText variant="xs" weight="semiBold" color="#B45309">
-            Winner
+    <View style={[styles.catRegSection, !isFirst && styles.catRegSectionBorder]}>
+      <TouchableOpacity
+        style={styles.catRegHeader}
+        onPress={() => setOpen((v) => !v)}
+        activeOpacity={0.75}
+      >
+        <View style={[styles.catRegAbbrChip, { backgroundColor: catColor + '22' }]}>
+          <AppText variant="xs" weight="bold" color={catColor}>
+            {abbr}
           </AppText>
         </View>
-      </View>
-
-      <View style={styles.scoreGrid}>
-        <ScoreLine
-          colors={colors}
-          name={result.player1_name ?? 'Side A'}
-          score={player1Score}
-          maxScore={maxScore}
-          styles={styles}
-          won={player1Won}
-        />
-        <ScoreLine
-          colors={colors}
-          name={result.player2_name ?? 'Side B'}
-          score={player2Score}
-          maxScore={maxScore}
-          styles={styles}
-          won={player2Won}
-        />
-      </View>
-
-      <View style={styles.resultMetaGrid}>
-        <View style={styles.resultMetaTile}>
-          <AppText variant="xs" color={colors.textMuted}>
-            Final score
-          </AppText>
-          <AppText variant="body" weight="semiBold">
-            {result.score ?? `${player1Score}-${player2Score}`}
-          </AppText>
-        </View>
-        {result.prize_money_received ? (
-          <View style={styles.resultMetaTile}>
-            <AppText variant="xs" color={colors.textMuted}>
-              Prize received
-            </AppText>
-            <AppText variant="body" weight="semiBold" color={colors.primary}>
-              ₹{result.prize_money_received}
-            </AppText>
-          </View>
-        ) : null}
-      </View>
-
-      {result.result_notes ? (
-        <AppText variant="caption" color={colors.textSecondary} style={{ marginTop: 10 }}>
-          {result.result_notes}
+        <AppText variant="label" weight="semiBold" style={{ flex: 1 }} numberOfLines={1}>
+          {catName}
         </AppText>
+        <View style={styles.catRegCounts}>
+          {approved > 0 ? (
+            <View style={[styles.catRegCountPill, { backgroundColor: '#DCFCE7' }]}>
+              <Ionicons name="checkmark" size={10} color="#16A34A" />
+              <AppText variant="xs" weight="bold" color="#16A34A">
+                {approved}
+              </AppText>
+            </View>
+          ) : null}
+          {pending > 0 ? (
+            <View style={[styles.catRegCountPill, { backgroundColor: '#FEF3C7' }]}>
+              <Ionicons name="time-outline" size={10} color="#D97706" />
+              <AppText variant="xs" weight="bold" color="#D97706">
+                {pending}
+              </AppText>
+            </View>
+          ) : null}
+          {waitlisted > 0 ? (
+            <View style={[styles.catRegCountPill, { backgroundColor: '#EDE9FE' }]}>
+              <Ionicons name="hourglass-outline" size={10} color="#7C3AED" />
+              <AppText variant="xs" weight="bold" color="#7C3AED">
+                {waitlisted}
+              </AppText>
+            </View>
+          ) : null}
+          <AppText variant="xs" color={colors.textMuted}>
+            {items.length} total
+          </AppText>
+        </View>
+        <Ionicons
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={15}
+          color={colors.textMuted}
+          style={{ marginLeft: 6 }}
+        />
+      </TouchableOpacity>
+
+      {open ? (
+        <View style={styles.catRegBody}>
+          {items.map((r) => (
+            <RegistrationRow
+              key={r.id}
+              registration={r}
+              onStatusChange={onStatusChange}
+              statusLoading={updatingId === r.id}
+              colors={colors}
+              styles={styles}
+            />
+          ))}
+        </View>
       ) : null}
     </View>
   );
 }
 
-function ScoreLine({
-  colors,
-  maxScore,
-  name,
-  score,
-  styles,
-  won,
-}: {
-  colors: any;
-  maxScore: number;
-  name: string;
-  score: number;
-  styles: any;
-  won: boolean;
-}) {
-  const width = `${Math.max((score / maxScore) * 100, 5)}%` as any;
-  return (
-    <View style={styles.scoreLine}>
-      <View style={styles.scoreLineTop}>
-        <AppText variant="caption" weight={won ? 'semiBold' : 'regular'} style={{ flex: 1 }}>
-          {name}
-        </AppText>
-        <AppText variant="title" weight="bold" color={won ? colors.primary : colors.textSecondary}>
-          {score}
-        </AppText>
-      </View>
-      <View style={styles.scoreTrack}>
-        <View
-          style={[
-            styles.scoreFill,
-            { width, backgroundColor: won ? colors.primary : colors.textMuted },
-          ]}
-        />
-      </View>
-    </View>
-  );
-}
-
+// ─── Main screen ─────────────────────────────────────────────────────────────
 export default function TournamentDetailScreen() {
   const { finishMatch, id } = useLocalSearchParams<{ finishMatch?: string; id: string }>();
   const { colors } = useTheme();
@@ -469,6 +711,7 @@ export default function TournamentDetailScreen() {
   const { showAlert } = useAlert();
   const user = useAuthStore((s) => s.user);
   const profile = useAuthStore((s) => s.profile);
+
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [registrationVisible, setRegistrationVisible] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -485,17 +728,13 @@ export default function TournamentDetailScreen() {
     if (!id) return;
     setLoading(true);
     try {
-      const nextTournament = await fetchTournamentById(id);
-      setTournament(nextTournament);
-      setResults(nextTournament ? await fetchTournamentResults(id) : []);
-      const canViewRegistrations =
-        !!nextTournament && (nextTournament.organizer_id === user?.id || profile?.role === 'admin');
-      setRegistrations(canViewRegistrations ? await fetchTournamentRegistrations(id) : []);
-      const shouldLoadMyEntries =
-        !!nextTournament && !!user?.id && nextTournament.organizer_id !== user.id;
-      setMyRegistrations(
-        shouldLoadMyEntries ? await fetchUserTournamentRegistrations(id, user.id) : []
-      );
+      const next = await fetchTournamentById(id);
+      setTournament(next);
+      setResults(next ? await fetchTournamentResults(id) : []);
+      const canViewReg = !!next && (next.organizer_id === user?.id || profile?.role === 'admin');
+      setRegistrations(canViewReg ? await fetchTournamentRegistrations(id) : []);
+      const loadMyEntries = !!next && !!user?.id && next.organizer_id !== user.id;
+      setMyRegistrations(loadMyEntries ? await fetchUserTournamentRegistrations(id, user.id) : []);
     } catch (err: any) {
       showAlert({
         type: 'danger',
@@ -514,9 +753,8 @@ export default function TournamentDetailScreen() {
   );
 
   useEffect(() => {
-    if (handledFinishParam || finishMatch !== '1' || profile?.role !== 'admin' || !tournament) {
+    if (handledFinishParam || finishMatch !== '1' || profile?.role !== 'admin' || !tournament)
       return;
-    }
     setResultEntryVisible(true);
     setHandledFinishParam(true);
   }, [finishMatch, handledFinishParam, profile?.role, tournament]);
@@ -524,9 +762,20 @@ export default function TournamentDetailScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.notFound}>
-          <ActivityIndicator color={colors.primary} />
+        <View style={styles.navBar}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <AppText variant="title" weight="bold">
+            Tournament
+          </AppText>
         </View>
+        <ScrollView
+          contentContainerStyle={styles.loadingScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          <SkeletonLoader variant="detail" count={3} />
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -534,7 +783,7 @@ export default function TournamentDetailScreen() {
   if (!tournament) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.notFound}>
+        <View style={styles.centered}>
           <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
           <AppText variant="title" color={colors.textMuted} center style={{ marginTop: 12 }}>
             Tournament not found
@@ -555,11 +804,10 @@ export default function TournamentDetailScreen() {
     tournament.start_date === tournament.end_date
       ? formatDate(tournament.start_date)
       : `${formatDate(tournament.start_date)} – ${formatDate(tournament.end_date)}`;
+
   const totalSlots = tournament.categories?.reduce((s, c) => s + c.max_players, 0) ?? 0;
   const filledSlots = tournament.categories?.reduce((s, c) => s + c.current_players, 0) ?? 0;
-  const registeredCategoryIds = myRegistrations
-    .map((registration) => registration.category_id)
-    .filter(Boolean);
+  const registeredCategoryIds = myRegistrations.map((r) => r.category_id).filter(Boolean);
   const openCategoryCount = tournament.categories?.length ?? 0;
   const hasJoined = myRegistrations.length > 0;
   const myEntryStatus = myRegistrations[0]?.status ?? null;
@@ -573,18 +821,11 @@ export default function TournamentDetailScreen() {
     canJoinAnotherCategory;
   const canViewRegistrations = tournament.organizer_id === user?.id || profile?.role === 'admin';
   const canManageResults = profile?.role === 'admin';
-  const approvedRegistrationCount = registrations.filter(
-    (registration) => registration.status === 'approved'
-  ).length;
-  const pendingRegistrationCount = registrations.filter(
-    (registration) => registration.status === 'pending'
-  ).length;
-  const rejectedRegistrationCount = registrations.filter(
-    (registration) => registration.status === 'rejected'
-  ).length;
-  const waitlistedRegistrationCount = registrations.filter(
-    (registration) => registration.status === 'waitlisted'
-  ).length;
+
+  const approvedCount = registrations.filter((r) => r.status === 'approved').length;
+  const pendingCount = registrations.filter((r) => r.status === 'pending').length;
+  const rejectedCount = registrations.filter((r) => r.status === 'rejected').length;
+  const waitlistedCount = registrations.filter((r) => r.status === 'waitlisted').length;
   const statusCountsByCategory = getRegistrationCountsByCategory(registrations);
   const exactCoordinates = getTournamentCoordinates(tournament);
   const hasMapLocation = !!tournament.venue_map_url || !!exactCoordinates;
@@ -597,14 +838,12 @@ export default function TournamentDetailScreen() {
   const handleAddToCalendar = async () => {
     setCalendarLoading(true);
     try {
-      const startDate = new Date(`${tournament.start_date}T09:00:00+05:30`);
-      const endDate = new Date(`${tournament.end_date}T18:00:00+05:30`);
       await addCalendarEvent({
         title: tournament.title,
         location: getTournamentLocationLabel(tournament),
         notes: tournament.description ?? undefined,
-        startDate,
-        endDate,
+        startDate: new Date(`${tournament.start_date}T09:00:00+05:30`),
+        endDate: new Date(`${tournament.end_date}T18:00:00+05:30`),
       });
       showAlert({
         type: 'success',
@@ -625,6 +864,10 @@ export default function TournamentDetailScreen() {
   const handleOpenMap = async () => {
     if (!hasMapLocation) return;
     await openTournamentMap(tournament);
+  };
+
+  const handleOpenDetailedResult = () => {
+    router.push({ pathname: '/(app)/tournament-result/[id]', params: { id: tournament.id } });
   };
 
   const handleRegistrationStatusChange = async (
@@ -685,89 +928,161 @@ export default function TournamentDetailScreen() {
       {/* Nav bar */}
       <View style={styles.navBar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={20} color={colors.text} />
         </TouchableOpacity>
         <AppText variant="bodyLg" weight="semiBold" style={{ flex: 1 }} numberOfLines={1}>
           Tournament Details
         </AppText>
-        <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
-          <AppText variant="xs" weight="semiBold" color={statusCfg.color}>
-            {statusCfg.label}
-          </AppText>
-        </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {/* Banner */}
+        {/* ── Banner ── */}
         <View style={[styles.banner, { backgroundColor: accentColor }]}>
-          <Ionicons
-            name="trophy"
-            size={56}
-            color="rgba(255,255,255,0.15)"
-            style={styles.bannerIcon}
-          />
+          {/* Badminton court decoration */}
+          <View style={StyleSheet.absoluteFill}>
+            <View style={styles.courtOuter} />
+            <View style={styles.courtNet} />
+            <View style={styles.courtCenter} />
+            <View style={[styles.courtService, { left: '22%' }]} />
+            <View style={[styles.courtService, { right: '22%' }]} />
+          </View>
+
+          {/* Shuttlecock watermark */}
+          <View style={styles.shuttleWrap}>
+            <View style={styles.shuttleCork} />
+            <View style={styles.shuttleFeathers}>
+              {([22, 28, 24] as number[]).map((h, i) => (
+                <View key={i} style={[styles.feather, { height: h }]} />
+              ))}
+            </View>
+          </View>
+
+          {/* Top row: sport chip + status pill */}
+          <View style={styles.bannerTopRow}>
+            <View style={styles.bannerSportChip}>
+              <Ionicons name="tennisball" size={11} color="rgba(255,255,255,0.9)" />
+              <AppText variant="xs" weight="semiBold" color="rgba(255,255,255,0.9)">
+                Badminton
+              </AppText>
+            </View>
+            <View style={[styles.bannerStatusPill, { backgroundColor: statusCfg.bg }]}>
+              {statusCfg.dot && <LiveDot color={statusCfg.color} />}
+              <AppText variant="xs" weight="bold" color={statusCfg.color}>
+                {statusCfg.label}
+              </AppText>
+            </View>
+          </View>
+
+          {/* Title + organizer */}
           <View style={styles.bannerContent}>
-            <AppText variant="heading" weight="bold" color="#fff" style={{ lineHeight: 28 }}>
+            <AppText
+              variant="heading"
+              weight="bold"
+              color="#fff"
+              numberOfLines={2}
+              style={{ lineHeight: 30 }}
+            >
               {tournament.title}
             </AppText>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 }}>
-              <Ionicons name="person-outline" size={13} color="rgba(255,255,255,0.75)" />
-              <AppText variant="caption" color="rgba(255,255,255,0.75)">
-                {tournament.organizer_name}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 }}>
+              <Ionicons name="person-circle-outline" size={14} color="rgba(255,255,255,0.8)" />
+              <AppText variant="caption" color="rgba(255,255,255,0.8)">
+                by {tournament.organizer_name}
               </AppText>
             </View>
           </View>
         </View>
 
-        {/* Key info tiles */}
-        <View style={styles.infoGrid}>
-          <View style={[styles.infoTile, { flex: 1 }]}>
-            <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-            <AppText variant="xs" color={colors.textMuted} style={{ marginTop: 4 }}>
-              Date
-            </AppText>
-            <AppText variant="label" weight="semiBold">
-              {dateRange}
-            </AppText>
-          </View>
-          <View style={[styles.infoTile, { flex: 1 }]}>
-            <Ionicons name="location-outline" size={18} color={colors.primary} />
-            <AppText variant="xs" color={colors.textMuted} style={{ marginTop: 4 }}>
-              City
-            </AppText>
-            <AppText variant="label" weight="semiBold">
-              {tournament.city}
-            </AppText>
-          </View>
-        </View>
-        <View style={styles.infoGrid}>
-          <View style={[styles.infoTile, { flex: 1 }]}>
-            <Ionicons name="time-outline" size={18} color={colors.primary} />
-            <AppText variant="xs" color={colors.textMuted} style={{ marginTop: 4 }}>
-              Reg. Deadline
-            </AppText>
-            <AppText variant="label" weight="semiBold">
-              {formatDate(tournament.registration_deadline)}
-            </AppText>
-          </View>
-          {tournament.prize_pool && (
-            <View style={[styles.infoTile, { flex: 1 }]}>
-              <Ionicons name="gift-outline" size={18} color={colors.primary} />
-              <AppText variant="xs" color={colors.textMuted} style={{ marginTop: 4 }}>
-                Prize Pool
-              </AppText>
-              <AppText variant="label" weight="semiBold">
-                {tournament.prize_pool}
-              </AppText>
-            </View>
-          )}
-        </View>
+        {/* ── Quick stat strip ── */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.statsScroll}
+          contentContainerStyle={styles.statsContent}
+        >
+          <StatChip
+            icon="calendar-outline"
+            label="Dates"
+            value={dateRange}
+            colors={colors}
+            highlight
+          />
+          <StatChip icon="location-outline" label="City" value={tournament.city} colors={colors} />
+          <StatChip
+            icon="time-outline"
+            label="Deadline"
+            value={formatDate(tournament.registration_deadline)}
+            colors={colors}
+          />
+          {tournament.max_courts ? (
+            <StatChip
+              icon="grid-outline"
+              label="Courts"
+              value={`${tournament.max_courts}`}
+              colors={colors}
+            />
+          ) : null}
+          {tournament.prize_pool ? (
+            <StatChip
+              icon="trophy-outline"
+              label="Prize"
+              value={tournament.prize_pool}
+              colors={colors}
+              highlight
+            />
+          ) : null}
+          <StatChip
+            icon="people-outline"
+            label="Slots"
+            value={`${filledSlots}/${totalSlots}`}
+            colors={colors}
+          />
+        </ScrollView>
 
+        {/* ── Results ── */}
+        {results.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <View style={{ flex: 1 }}>
+                <AppText variant="title" weight="semiBold">
+                  Results
+                </AppText>
+                <AppText variant="xs" color={colors.textMuted}>
+                  {results.length} completed match{results.length === 1 ? '' : 'es'}
+                </AppText>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleOpenDetailedResult}
+                style={[
+                  styles.sectionLinkBtn,
+                  { borderColor: accentColor + '50', backgroundColor: accentColor + '12' },
+                ]}
+              >
+                <Ionicons name="stats-chart-outline" size={13} color={accentColor} />
+                <AppText variant="xs" weight="semiBold" color={accentColor}>
+                  See all
+                </AppText>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.resultList}>
+              {results.slice(0, 2).map((r) => (
+                <ResultCard key={r.id} result={r} colors={colors} styles={styles} />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* ── Admin tools ── */}
         {canManageResults ? (
           <View style={styles.section}>
-            <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-              Admin Tools
-            </AppText>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: '#DC2626' }]} />
+              <AppText variant="title" weight="semiBold">
+                Admin Tools
+              </AppText>
+            </View>
             <View style={styles.adminActions}>
               <TouchableOpacity
                 activeOpacity={0.85}
@@ -775,11 +1090,14 @@ export default function TournamentDetailScreen() {
                 onPress={() =>
                   handleTournamentStatusChange(tournament.status === 'paused' ? 'open' : 'paused')
                 }
-                style={[styles.adminAction, tournament.status !== 'paused' && styles.pauseAction]}
+                style={[
+                  styles.adminAction,
+                  tournament.status !== 'paused' ? styles.pauseAction : styles.resumeAction,
+                ]}
               >
                 <Ionicons
                   name={tournament.status === 'paused' ? 'play-outline' : 'pause-outline'}
-                  size={17}
+                  size={16}
                   color={tournament.status === 'paused' ? colors.primary : '#DC2626'}
                 />
                 <AppText
@@ -795,7 +1113,7 @@ export default function TournamentDetailScreen() {
                 onPress={() => setResultEntryVisible(true)}
                 style={[styles.adminAction, styles.finishAction]}
               >
-                <Ionicons name="flag-outline" size={17} color="#fff" />
+                <Ionicons name="flag-outline" size={16} color="#fff" />
                 <AppText variant="label" weight="semiBold" color="#fff">
                   Finish Match
                 </AppText>
@@ -804,11 +1122,14 @@ export default function TournamentDetailScreen() {
           </View>
         ) : null}
 
-        {/* Venue */}
+        {/* ── Venue ── */}
         <View style={styles.section}>
-          <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-            Venue
-          </AppText>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+            <AppText variant="title" weight="semiBold">
+              Venue
+            </AppText>
+          </View>
           <TouchableOpacity
             activeOpacity={hasMapLocation ? 0.82 : 1}
             disabled={!hasMapLocation}
@@ -820,22 +1141,22 @@ export default function TournamentDetailScreen() {
                 <AppText variant="bodyLg" weight="medium">
                   {tournament.venue}
                 </AppText>
-                {tournament.venue_address && (
+                {tournament.venue_address ? (
                   <AppText variant="body" color={colors.textSecondary} style={{ marginTop: 2 }}>
                     {tournament.venue_address}
                   </AppText>
-                )}
+                ) : null}
               </View>
               {hasMapLocation ? (
-                <View style={styles.mapButton}>
-                  <Ionicons name="navigate-outline" size={18} color={colors.primary} />
+                <View style={[styles.mapBtn, { backgroundColor: accentColor + '18' }]}>
+                  <Ionicons name="navigate-outline" size={18} color={accentColor} />
                 </View>
               ) : null}
             </View>
             <View style={styles.venueMeta}>
               {tournament.max_courts ? (
                 <View style={styles.inlineMeta}>
-                  <Ionicons name="grid-outline" size={13} color={colors.textMuted} />
+                  <Ionicons name="grid-outline" size={12} color={colors.textMuted} />
                   <AppText variant="caption" color={colors.textMuted}>
                     {tournament.max_courts} courts
                   </AppText>
@@ -843,7 +1164,7 @@ export default function TournamentDetailScreen() {
               ) : null}
               {exactCoordinates ? (
                 <View style={styles.inlineMeta}>
-                  <Ionicons name="pin-outline" size={13} color={colors.textMuted} />
+                  <Ionicons name="pin-outline" size={12} color={colors.textMuted} />
                   <AppText variant="caption" color={colors.textMuted}>
                     Exact pin saved
                   </AppText>
@@ -851,8 +1172,8 @@ export default function TournamentDetailScreen() {
               ) : null}
               {hasMapLocation ? (
                 <View style={styles.inlineMeta}>
-                  <Ionicons name="map-outline" size={13} color={colors.primary} />
-                  <AppText variant="caption" weight="semiBold" color={colors.primary}>
+                  <Ionicons name="map-outline" size={12} color={accentColor} />
+                  <AppText variant="caption" weight="semiBold" color={accentColor}>
                     Open in Maps
                   </AppText>
                 </View>
@@ -861,21 +1182,16 @@ export default function TournamentDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Categories */}
-        {tournament.categories && tournament.categories.length > 0 && (
+        {/* ── Categories ── */}
+        {tournament.categories && tournament.categories.length > 0 ? (
           <View style={styles.section}>
-            <View
-              style={{
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <AppText variant="title" weight="semiBold" style={{ flex: 1 }}>
                 Categories
               </AppText>
-              <AppText variant="caption" color={colors.textMuted}>
-                {filledSlots}/{totalSlots} approved slots filled
+              <AppText variant="xs" color={colors.textMuted}>
+                {filledSlots}/{totalSlots} slots filled
               </AppText>
             </View>
             <View style={styles.catList}>
@@ -894,34 +1210,14 @@ export default function TournamentDetailScreen() {
               ))}
             </View>
           </View>
-        )}
-
-        {/* Results */}
-        {results.length > 0 ? (
-          <View style={styles.section}>
-            <View style={styles.registrationsHeader}>
-              <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-                Results
-              </AppText>
-              <View style={styles.resultCountBadge}>
-                <Ionicons name="stats-chart-outline" size={13} color={colors.primary} />
-                <AppText variant="xs" weight="semiBold" color={colors.primary}>
-                  {results.length} match{results.length === 1 ? '' : 'es'}
-                </AppText>
-              </View>
-            </View>
-            <View style={styles.resultList}>
-              {results.map((result) => (
-                <ResultCard key={result.id} result={result} colors={colors} styles={styles} />
-              ))}
-            </View>
-          </View>
         ) : null}
 
+        {/* ── Your entry ── */}
         {!canViewRegistrations && hasJoined ? (
           <View style={styles.section}>
-            <View style={styles.registrationsHeader}>
-              <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <AppText variant="title" weight="semiBold" style={{ flex: 1 }}>
                 Your Entry
               </AppText>
               {myEntryStatusCfg ? (
@@ -933,7 +1229,7 @@ export default function TournamentDetailScreen() {
                 >
                   <Ionicons
                     name={myEntryStatus === 'approved' ? 'checkmark-circle' : 'hourglass-outline'}
-                    size={14}
+                    size={13}
                     color={myEntryStatusCfg.color}
                   />
                   <AppText variant="xs" weight="semiBold" color={myEntryStatusCfg.color}>
@@ -944,17 +1240,12 @@ export default function TournamentDetailScreen() {
             </View>
             <View style={styles.card}>
               <View style={styles.registrationsList}>
-                {myRegistrations.map((registration) => (
-                  <RegistrationRow
-                    key={registration.id}
-                    registration={registration}
-                    colors={colors}
-                    styles={styles}
-                  />
+                {myRegistrations.map((r) => (
+                  <RegistrationRow key={r.id} registration={r} colors={colors} styles={styles} />
                 ))}
               </View>
               <View style={styles.editNotice}>
-                <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
+                <Ionicons name="information-circle-outline" size={15} color={colors.primary} />
                 <AppText variant="caption" color={colors.textSecondary} style={{ flex: 1 }}>
                   Need to edit player, partner, phone, or notes? Please contact the organizer so
                   they can update your entry correctly.
@@ -964,26 +1255,27 @@ export default function TournamentDetailScreen() {
           </View>
         ) : null}
 
+        {/* ── Joined players (organizer/admin view) ── */}
         {canViewRegistrations ? (
           <View style={styles.section}>
-            <View style={styles.registrationsTitleBlock}>
-              <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-                Joined Players
-              </AppText>
-              <AppText variant="caption" color={colors.textMuted}>
-                {approvedRegistrationCount} joined / {pendingRegistrationCount} pending /{' '}
-                {rejectedRegistrationCount} rejected
-                {waitlistedRegistrationCount > 0
-                  ? ` / ${waitlistedRegistrationCount} waitlisted`
-                  : ''}
-              </AppText>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <View style={{ flex: 1 }}>
+                <AppText variant="title" weight="semiBold">
+                  Joined Players
+                </AppText>
+                <AppText variant="xs" color={colors.textMuted}>
+                  {approvedCount} joined · {pendingCount} pending · {rejectedCount} rejected
+                  {waitlistedCount > 0 ? ` · ${waitlistedCount} waitlisted` : ''}
+                </AppText>
+              </View>
             </View>
-            {pendingRegistrationCount > 0 ? (
+            {pendingCount > 0 ? (
               <View style={styles.pendingNotice}>
-                <Ionicons name="hourglass-outline" size={15} color="#D97706" />
+                <Ionicons name="hourglass-outline" size={14} color="#D97706" />
                 <AppText variant="caption" color={colors.textSecondary} style={{ flex: 1 }}>
-                  {pendingRegistrationCount} pending entry
-                  {pendingRegistrationCount === 1 ? '' : 'ies'} needs organizer approval.
+                  {pendingCount} pending entr{pendingCount === 1 ? 'y' : 'ies'} needs organizer
+                  approval.
                 </AppText>
               </View>
             ) : null}
@@ -993,97 +1285,131 @@ export default function TournamentDetailScreen() {
                   No players have joined yet.
                 </AppText>
               ) : (
-                <View style={styles.registrationsList}>
-                  {registrations.map((registration) => (
-                    <RegistrationRow
-                      key={registration.id}
-                      registration={registration}
-                      onStatusChange={handleRegistrationStatusChange}
-                      statusLoading={updatingRegistrationId === registration.id}
-                      colors={colors}
-                      styles={styles}
-                    />
-                  ))}
-                </View>
+                (() => {
+                  const grouped = groupRegistrationsByCategory(registrations);
+                  const canChange =
+                    tournament.status !== 'completed' && tournament.status !== 'cancelled'
+                      ? handleRegistrationStatusChange
+                      : undefined;
+                  if (grouped.length <= 1) {
+                    return (
+                      <View style={styles.registrationsList}>
+                        {registrations.map((r) => (
+                          <RegistrationRow
+                            key={r.id}
+                            registration={r}
+                            onStatusChange={canChange}
+                            statusLoading={updatingRegistrationId === r.id}
+                            colors={colors}
+                            styles={styles}
+                          />
+                        ))}
+                      </View>
+                    );
+                  }
+                  return (
+                    <View>
+                      {grouped.map((group, i) => (
+                        <CategoryRegistrationSection
+                          key={group.catId}
+                          catName={group.catName}
+                          items={group.items}
+                          onStatusChange={canChange}
+                          updatingId={updatingRegistrationId}
+                          colors={colors}
+                          styles={styles}
+                          isFirst={i === 0}
+                        />
+                      ))}
+                    </View>
+                  );
+                })()
               )}
             </View>
           </View>
         ) : null}
 
-        {/* Description */}
-        {tournament.description && (
+        {/* ── About ── */}
+        {tournament.description ? (
           <View style={styles.section}>
-            <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-              About
-            </AppText>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <AppText variant="title" weight="semiBold">
+                About
+              </AppText>
+            </View>
             <View style={styles.card}>
               <AppText variant="body" color={colors.textSecondary} style={{ lineHeight: 22 }}>
                 {tournament.description}
               </AppText>
             </View>
           </View>
-        )}
+        ) : null}
 
-        {/* Rules */}
-        {tournament.rules && (
+        {/* ── Rules ── */}
+        {tournament.rules ? (
           <View style={styles.section}>
-            <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-              Rules
-            </AppText>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <AppText variant="title" weight="semiBold">
+                Rules
+              </AppText>
+            </View>
             <View style={styles.card}>
               <AppText variant="body" color={colors.textSecondary} style={{ lineHeight: 22 }}>
                 {tournament.rules}
               </AppText>
             </View>
           </View>
-        )}
+        ) : null}
 
-        {/* Payment */}
-        {tournament.payment_address && (
+        {/* ── Payment ── */}
+        {tournament.payment_address ? (
           <View style={styles.section}>
-            <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-              Payment
-            </AppText>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <AppText variant="title" weight="semiBold">
+                Payment
+              </AppText>
+            </View>
             <View style={styles.card}>
-              <View style={styles.paymentRow}>
-                <Ionicons name="card-outline" size={16} color={colors.primary} />
+              <View style={styles.inlineMeta}>
+                <Ionicons name="card-outline" size={15} color={accentColor} />
                 <AppText variant="body" color={colors.textSecondary} style={{ flex: 1 }}>
                   {tournament.payment_address}
                 </AppText>
               </View>
             </View>
           </View>
-        )}
+        ) : null}
 
-        {/* Contact */}
-        {(contactPhones.length > 0 || tournament.contact_email) && (
+        {/* ── Contact ── */}
+        {contactPhones.length > 0 || tournament.contact_email ? (
           <View style={styles.section}>
-            <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-              Contact
-            </AppText>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <AppText variant="title" weight="semiBold">
+                Contact
+              </AppText>
+            </View>
             <View style={styles.card}>
-              {contactPhones.map((phone, index) => (
-                <View key={phone} style={[styles.contactRow, index > 0 ? { marginTop: 10 } : null]}>
-                  <Ionicons name="call-outline" size={16} color={colors.primary} />
+              {contactPhones.map((phone, i) => (
+                <View key={phone} style={[styles.inlineMeta, i > 0 ? { marginTop: 10 } : null]}>
+                  <Ionicons name="call-outline" size={15} color={accentColor} />
                   <AppText variant="body">{phone}</AppText>
                 </View>
               ))}
-              {tournament.contact_email && (
+              {tournament.contact_email ? (
                 <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 10,
-                    marginTop: contactPhones.length > 0 ? 10 : 0,
-                  }}
+                  style={[styles.inlineMeta, contactPhones.length > 0 ? { marginTop: 10 } : null]}
                 >
-                  <Ionicons name="mail-outline" size={16} color={colors.primary} />
+                  <Ionicons name="mail-outline" size={15} color={accentColor} />
                   <AppText variant="body">{tournament.contact_email}</AppText>
                 </View>
-              )}
+              ) : null}
             </View>
           </View>
-        )}
+        ) : null}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -1102,13 +1428,14 @@ export default function TournamentDetailScreen() {
           fullWidth={false}
         />
         <AppButton
-          title={hasJoined ? 'Join Another Category' : 'Register for this Tournament'}
+          title={hasJoined ? 'Join Another Category' : 'Register'}
           onPress={() => setRegistrationVisible(true)}
           disabled={!canRegister}
           style={{ flex: 1 }}
           fullWidth={false}
         />
       </SafeAreaView>
+
       <RegistrationSheet
         tournament={tournament}
         visible={registrationVisible}
@@ -1129,22 +1456,17 @@ export default function TournamentDetailScreen() {
 
 function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
-    safe: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    notFound: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
+    safe: { flex: 1, backgroundColor: colors.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+    // Nav
     navBar: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 16,
-      paddingVertical: 12,
-      gap: 10,
-      borderBottomWidth: 1,
+      paddingVertical: 10,
+      gap: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
     backBtn: {
@@ -1152,51 +1474,137 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       height: 36,
       borderRadius: 18,
       backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
       justifyContent: 'center',
       alignItems: 'center',
     },
-    statusBadge: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 8,
+
+    scroll: { paddingBottom: 16 },
+    loadingScroll: {
+      paddingBottom: 32,
+      paddingHorizontal: 16,
+      paddingTop: 14,
     },
-    scroll: {
-      paddingBottom: 16,
-    },
+
+    // Banner
     banner: {
       paddingHorizontal: 20,
-      paddingVertical: 24,
-      position: 'relative',
+      paddingTop: 16,
+      paddingBottom: 22,
       overflow: 'hidden',
     },
-    bannerIcon: {
+    courtOuter: {
       position: 'absolute',
-      right: 16,
-      top: 12,
+      top: 10,
+      left: 14,
+      right: 14,
+      bottom: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.18)',
+      borderRadius: 6,
+    },
+    courtNet: {
+      position: 'absolute',
+      top: '50%' as any,
+      left: 14,
+      right: 14,
+      height: 1,
+      backgroundColor: 'rgba(255,255,255,0.25)',
+    },
+    courtCenter: {
+      position: 'absolute',
+      top: 10,
+      bottom: 8,
+      left: '50%' as any,
+      width: 1,
+      backgroundColor: 'rgba(255,255,255,0.15)',
+    },
+    courtService: {
+      position: 'absolute',
+      top: 10,
+      bottom: 8,
+      width: 1,
+      backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    shuttleWrap: {
+      position: 'absolute',
+      right: 14,
+      bottom: 14,
+      alignItems: 'center',
+      opacity: 0.25,
+      transform: [{ rotate: '-20deg' }],
+    },
+    shuttleCork: {
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: '#FDE68A',
+    },
+    shuttleFeathers: {
+      flexDirection: 'row',
+      gap: 3,
+      marginTop: -2,
+    },
+    feather: {
+      width: 9,
+      borderRadius: 5,
+      backgroundColor: 'rgba(255,255,255,0.9)',
+    },
+    bannerTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 14,
+    },
+    bannerSportChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: 'rgba(0,0,0,0.18)',
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderRadius: 20,
+    },
+    bannerStatusPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 20,
     },
     bannerContent: {
-      paddingRight: 60,
+      paddingRight: 50,
     },
-    infoGrid: {
+
+    // Quick stats
+    statsScroll: { marginTop: 14 },
+    statsContent: { paddingHorizontal: 16, gap: 10 },
+
+    // Section
+    section: { paddingHorizontal: 16, marginTop: 24 },
+    sectionHeaderRow: {
       flexDirection: 'row',
-      gap: 12,
-      paddingHorizontal: 16,
-      marginTop: 12,
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 12,
     },
-    infoTile: {
-      backgroundColor: colors.surface,
-      borderRadius: 14,
-      padding: 14,
+    sectionAccentDot: {
+      width: 4,
+      height: 20,
+      borderRadius: 2,
+    },
+    sectionLinkBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: colors.border,
     },
-    section: {
-      paddingHorizontal: 16,
-      marginTop: 24,
-    },
-    sectionTitle: {
-      marginBottom: 10,
-    },
+
+    // Generic card
     card: {
       backgroundColor: colors.surface,
       borderRadius: 14,
@@ -1204,274 +1612,252 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderWidth: 1,
       borderColor: colors.border,
     },
-    adminActions: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    adminAction: {
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderColor: colors.border,
-      borderRadius: 12,
-      borderWidth: 1,
-      flex: 1,
-      flexDirection: 'row',
-      gap: 7,
-      justifyContent: 'center',
-      minHeight: 44,
-      paddingHorizontal: 10,
-    },
-    pauseAction: {
-      backgroundColor: '#FEF2F2',
-      borderColor: '#FECACA',
-    },
-    finishAction: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-    },
-    venueHeader: {
-      alignItems: 'flex-start',
-      flexDirection: 'row',
-      gap: 12,
-    },
+
+    // Venue
+    venueHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
     venueMeta: {
-      alignItems: 'center',
       flexDirection: 'row',
       flexWrap: 'wrap',
+      alignItems: 'center',
       gap: 12,
       marginTop: 10,
     },
-    inlineMeta: {
+    inlineMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    mapBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
       alignItems: 'center',
-      flexDirection: 'row',
-      gap: 5,
-    },
-    mapButton: {
-      alignItems: 'center',
-      backgroundColor: colors.primaryLight,
-      borderRadius: 999,
-      height: 36,
       justifyContent: 'center',
-      width: 36,
     },
-    catList: {
-      gap: 10,
-    },
+
+    // Categories
+    catList: { gap: 10 },
     catRow: {
+      flexDirection: 'row',
       backgroundColor: colors.surface,
       borderRadius: 14,
-      padding: 14,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 10,
+      overflow: 'hidden',
     },
-    catTop: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    catMeta: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
+    catAccentStrip: { width: 4, alignSelf: 'stretch' },
+    catInner: { flex: 1, padding: 14, gap: 10 },
+    catTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    catNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+    catAbbrChip: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+    catFeeChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1 },
+    catMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     skillBadge: {
-      paddingHorizontal: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 7,
       paddingVertical: 3,
       borderRadius: 6,
       borderWidth: 1,
       borderColor: colors.border,
     },
-    prizeBadge: {
+    catPrizeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+
+    // Result card (match rows layout)
+    resultList: { gap: 12 },
+    resultCard: {
+      flexDirection: 'row',
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: 'hidden',
+    },
+    resultAccentStrip: { width: 4, alignSelf: 'stretch' },
+    resultInner: { flex: 1, padding: 14, gap: 10 },
+    resultHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    resultCatChip: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+    matchRows: {
+      borderRadius: 10,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    matchRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 8,
+      backgroundColor: colors.background,
     },
-    registrationsHeader: {
-      alignItems: 'center',
+    matchRowWon: {
+      backgroundColor: '#FFFBEB',
+    },
+    matchRowLeft: {
+      flex: 1,
       flexDirection: 'row',
-      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 7,
     },
-    registrationsTitleBlock: {
-      marginBottom: 10,
+    matchScore: {
+      fontSize: 20,
+      fontWeight: '800',
+      lineHeight: 24,
     },
-    registrationsList: {
-      gap: 12,
+    matchDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.border,
     },
+    resultFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+    },
+    resultScorePill: {
+      backgroundColor: colors.background,
+      borderRadius: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    resultPrizePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: '#FFFBEB',
+      borderRadius: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderWidth: 1,
+      borderColor: '#F59E0B40',
+    },
+
+    // Admin
+    adminActions: { flexDirection: 'row', gap: 10 },
+    adminAction: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 7,
+      minHeight: 46,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    pauseAction: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
+    resumeAction: { backgroundColor: colors.primaryLight, borderColor: colors.primary + '50' },
+    finishAction: { backgroundColor: colors.primary, borderColor: colors.primary },
+
+    // Registrations
+    registrationsList: { gap: 12 },
     registrationRow: {
-      borderBottomColor: colors.border,
       borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
       gap: 8,
       paddingBottom: 12,
     },
-    registrationTop: {
-      alignItems: 'center',
-      flexDirection: 'row',
-      gap: 10,
-    },
-    registrationStatus: {
-      borderRadius: 8,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-    },
-    registrationActions: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 2,
-    },
+    registrationTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    registrationCatDot: { width: 10, height: 10, borderRadius: 5 },
+    registrationStatusPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
+    registrationMeta: { gap: 3, paddingLeft: 20 },
+    registrationActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 },
     statusAction: {
-      alignItems: 'center',
-      borderRadius: 999,
       flexDirection: 'row',
+      alignItems: 'center',
       gap: 4,
+      borderRadius: 999,
       minHeight: 32,
       paddingHorizontal: 10,
       paddingVertical: 6,
     },
-    approveAction: {
-      backgroundColor: '#16A34A',
-    },
-    waitlistAction: {
-      backgroundColor: '#F5F3FF',
-      borderColor: '#DDD6FE',
-      borderWidth: 1,
-    },
-    rejectAction: {
-      backgroundColor: '#FEF2F2',
-      borderColor: '#FECACA',
-      borderWidth: 1,
-    },
-    disabled: {
-      opacity: 0.5,
-    },
+    approveAction: { backgroundColor: '#16A34A' },
+    waitlistAction: { backgroundColor: '#F5F3FF', borderColor: '#DDD6FE', borderWidth: 1 },
+    rejectAction: { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 },
+    disabled: { opacity: 0.5 },
+
     enteredBadge: {
-      alignItems: 'center',
-      backgroundColor: colors.primaryLight,
-      borderColor: colors.primary,
-      borderRadius: 999,
-      borderWidth: 1,
       flexDirection: 'row',
+      alignItems: 'center',
       gap: 4,
       paddingHorizontal: 9,
       paddingVertical: 4,
-    },
-    registrationMeta: {
-      gap: 3,
+      borderRadius: 999,
+      borderWidth: 1,
     },
     editNotice: {
+      flexDirection: 'row',
       alignItems: 'flex-start',
+      gap: 8,
       backgroundColor: colors.background,
-      borderColor: colors.border,
       borderRadius: 12,
       borderWidth: 1,
-      flexDirection: 'row',
-      gap: 8,
-      marginTop: 14,
+      borderColor: colors.border,
       padding: 12,
+      marginTop: 14,
     },
     pendingNotice: {
+      flexDirection: 'row',
       alignItems: 'flex-start',
+      gap: 8,
       backgroundColor: '#FFFBEB',
       borderColor: '#FDE68A',
       borderRadius: 12,
       borderWidth: 1,
-      flexDirection: 'row',
-      gap: 8,
-      marginBottom: 10,
       padding: 12,
+      marginBottom: 10,
     },
-    resultCountBadge: {
-      alignItems: 'center',
-      backgroundColor: colors.primaryLight,
-      borderColor: colors.primary,
-      borderRadius: 999,
-      borderWidth: 1,
+
+    // Category registration sections
+    catRegSection: {
+      paddingVertical: 2,
+    },
+    catRegSectionBorder: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      marginTop: 4,
+      paddingTop: 4,
+    },
+    catRegHeader: {
       flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 10,
+    },
+    catRegAbbrChip: {
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      borderRadius: 6,
+    },
+    catRegCounts: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 5,
-      paddingHorizontal: 9,
-      paddingVertical: 4,
     },
-    resultList: {
+    catRegCountPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 20,
+    },
+    catRegBody: {
       gap: 12,
+      paddingBottom: 8,
+      paddingLeft: 2,
     },
-    resultCard: {
-      backgroundColor: colors.surface,
-      borderColor: colors.border,
-      borderRadius: 14,
-      borderWidth: 1,
-      padding: 14,
-    },
-    resultHeader: {
-      alignItems: 'center',
-      flexDirection: 'row',
-      gap: 10,
-    },
-    winnerBadge: {
-      alignItems: 'center',
-      backgroundColor: '#FEF3C7',
-      borderColor: '#FDE68A',
-      borderRadius: 999,
-      borderWidth: 1,
-      flexDirection: 'row',
-      gap: 4,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-    },
-    scoreGrid: {
-      gap: 12,
-      marginTop: 14,
-    },
-    scoreLine: {
-      gap: 6,
-    },
-    scoreLineTop: {
-      alignItems: 'center',
-      flexDirection: 'row',
-      gap: 10,
-    },
-    scoreTrack: {
-      backgroundColor: colors.background,
-      borderRadius: 999,
-      height: 10,
-      overflow: 'hidden',
-    },
-    scoreFill: {
-      borderRadius: 999,
-      height: 10,
-    },
-    resultMetaGrid: {
-      flexDirection: 'row',
-      gap: 10,
-      marginTop: 14,
-    },
-    resultMetaTile: {
-      backgroundColor: colors.background,
-      borderColor: colors.border,
-      borderRadius: 12,
-      borderWidth: 1,
-      flex: 1,
-      padding: 10,
-    },
-    paymentRow: {
-      alignItems: 'flex-start',
-      flexDirection: 'row',
-      gap: 10,
-    },
-    contactRow: {
-      alignItems: 'center',
-      flexDirection: 'row',
-      gap: 10,
-    },
+
+    // Bottom bar
     bottomBar: {
       flexDirection: 'row',
       gap: 10,
       paddingHorizontal: 16,
       paddingTop: 12,
-      borderTopWidth: 1,
+      borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.border,
     },
-    calendarButton: {
-      minWidth: 150,
-    },
+    calendarButton: { minWidth: 140 },
   });
 }

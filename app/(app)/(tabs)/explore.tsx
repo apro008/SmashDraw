@@ -1,31 +1,23 @@
 import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  View,
-  TextInput,
-  FlatList,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-} from 'react-native';
+import { View, TextInput, FlatList, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { AppText } from '~/components/AppText';
+import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { TournamentCard } from '~/components/TournamentCard';
 import { useTheme } from '~/hooks/useTheme';
 import { Tournament, TournamentStatus } from '~/types';
 import { fetchDiscoverableTournaments } from '~/lib/tournaments';
-import { useFocusEffect } from 'expo-router';
 import { useAlert } from '~/providers/AlertProvider';
 
-const STATUSES: { label: string; value: TournamentStatus | 'all' }[] = [
+const STATUSES: { label: string; value: TournamentStatus | 'all'; color?: string }[] = [
   { label: 'All', value: 'all' },
-  { label: 'Open', value: 'open' },
-  { label: 'Live', value: 'ongoing' },
-  { label: 'Paused', value: 'paused' },
-  { label: 'Ended', value: 'completed' },
+  { label: 'Open', value: 'open', color: '#16A34A' },
+  { label: 'Live', value: 'ongoing', color: '#EA580C' },
+  { label: 'Paused', value: 'paused', color: '#7C3AED' },
+  { label: 'Ended', value: 'completed', color: '#6B7280' },
 ];
 
 export default function ExploreScreen() {
@@ -39,6 +31,7 @@ export default function ExploreScreen() {
   const [query, setQuery] = useState('');
   const [city, setCity] = useState('All');
   const [status, setStatus] = useState<TournamentStatus | 'all'>('all');
+  const [filterOpen, setFilterOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -58,7 +51,6 @@ export default function ExploreScreen() {
         .finally(() => {
           if (mounted) setLoading(false);
         });
-
       return () => {
         mounted = false;
       };
@@ -82,88 +74,165 @@ export default function ExploreScreen() {
     });
   }, [city, query, status, tournaments]);
 
+  const hasActiveFilters = status !== 'all' || city !== 'All';
+
+  const handleClearFilters = () => {
+    setStatus('all');
+    setCity('All');
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Title */}
+      {/* Header */}
       <View style={styles.header}>
         <AppText variant="heading" weight="bold">
           Explore
         </AppText>
       </View>
 
-      {/* Search */}
-      <View style={styles.searchWrap}>
-        <Ionicons
-          name="search-outline"
-          size={18}
-          color={colors.textMuted}
-          style={styles.searchIcon}
-        />
-        <TextInput
-          style={styles.searchInput}
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search tournaments or cities"
-          placeholderTextColor={colors.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {query.length > 0 && (
-          <TouchableOpacity onPress={() => setQuery('')}>
-            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Status segmented control — primary filter */}
-      <View style={styles.statusWrap}>
-        {STATUSES.map((s) => (
-          <TouchableOpacity
-            key={s.value}
-            style={[styles.statusOption, status === s.value && styles.statusOptionActive]}
-            onPress={() => setStatus(s.value)}
-          >
-            <AppText
-              variant="label"
-              weight={status === s.value ? 'semiBold' : 'regular'}
-              color={status === s.value ? colors.primary : colors.textSecondary}
-            >
-              {s.label}
-            </AppText>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* City chips — secondary filter, only when multiple cities exist */}
-      {cities.length > 1 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.cityScroll}
-          contentContainerStyle={styles.cityRow}
-        >
-          {cities.map((c) => (
-            <TouchableOpacity
-              key={c}
-              style={[styles.cityChip, city === c && styles.cityChipActive]}
-              onPress={() => setCity(c)}
-            >
-              <AppText
-                variant="label"
-                weight={city === c ? 'semiBold' : 'regular'}
-                color={city === c ? colors.primary : colors.textSecondary}
-              >
-                {c}
-              </AppText>
+      {/* Search bar with filter icon */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchWrap}>
+          <Ionicons
+            name="search-outline"
+            size={18}
+            color={colors.textMuted}
+            style={styles.searchIcon}
+          />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search tournaments or cities"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {query.length > 0 ? (
+            <TouchableOpacity onPress={() => setQuery('')} style={styles.clearBtn}>
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+          ) : null}
+        </View>
+
+        {/* Filter toggle button */}
+        <TouchableOpacity
+          style={[
+            styles.filterBtn,
+            filterOpen && { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+          ]}
+          onPress={() => setFilterOpen((v) => !v)}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="options-outline"
+            size={20}
+            color={
+              filterOpen ? colors.primary : hasActiveFilters ? colors.primary : colors.textSecondary
+            }
+          />
+          {hasActiveFilters && !filterOpen ? (
+            <View style={[styles.filterBadge, { backgroundColor: colors.primary }]} />
+          ) : null}
+        </TouchableOpacity>
+      </View>
+
+      {/* Filter panel */}
+      {filterOpen ? (
+        <View style={styles.filterPanel}>
+          <View style={styles.filterPanelHeader}>
+            <AppText variant="label" weight="semiBold" color={colors.textSecondary}>
+              Filters
+            </AppText>
+            {hasActiveFilters ? (
+              <TouchableOpacity onPress={handleClearFilters}>
+                <AppText variant="label" weight="semiBold" color={colors.primary}>
+                  Clear all
+                </AppText>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* Status filter */}
+          <AppText
+            variant="xs"
+            weight="semiBold"
+            color={colors.textMuted}
+            style={styles.filterLabel}
+          >
+            STATUS
+          </AppText>
+          <View style={styles.statusWrap}>
+            {STATUSES.map((s) => {
+              const isActive = status === s.value;
+              const chipColor = s.color ?? colors.primary;
+              return (
+                <TouchableOpacity
+                  key={s.value}
+                  style={[
+                    styles.statusChip,
+                    isActive && { backgroundColor: chipColor + '20', borderColor: chipColor },
+                  ]}
+                  onPress={() => setStatus(s.value)}
+                  activeOpacity={0.8}
+                >
+                  {s.color && isActive ? (
+                    <View style={[styles.statusDot, { backgroundColor: chipColor }]} />
+                  ) : null}
+                  <AppText
+                    variant="label"
+                    weight={isActive ? 'semiBold' : 'regular'}
+                    color={isActive ? chipColor : colors.textSecondary}
+                  >
+                    {s.label}
+                  </AppText>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* City filter — only when multiple cities */}
+          {cities.length > 1 ? (
+            <>
+              <AppText
+                variant="xs"
+                weight="semiBold"
+                color={colors.textMuted}
+                style={styles.filterLabel}
+              >
+                CITY
+              </AppText>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.cityRow}
+              >
+                {cities.map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.cityChip, city === c && styles.cityChipActive]}
+                    onPress={() => setCity(c)}
+                    activeOpacity={0.8}
+                  >
+                    <AppText
+                      variant="label"
+                      weight={city === c ? 'semiBold' : 'regular'}
+                      color={city === c ? colors.primary : colors.textSecondary}
+                    >
+                      {c}
+                    </AppText>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Content */}
       {loading ? (
-        <View style={[styles.centered, { paddingBottom: tabBarHeight }]}>
-          <ActivityIndicator color={colors.primary} />
+        <View style={[styles.skeletonList, { paddingBottom: tabBarHeight + 8 }]}>
+          <SkeletonLoader count={5} variant="list" />
         </View>
       ) : filtered.length === 0 ? (
         <View style={[styles.centered, { paddingBottom: tabBarHeight }]}>
@@ -191,6 +260,23 @@ export default function ExploreScreen() {
               onPress={() =>
                 router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } })
               }
+              menuActions={[
+                {
+                  icon: 'information-circle-outline',
+                  label: 'View Details',
+                  onPress: () =>
+                    router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } }),
+                },
+                {
+                  icon: 'stats-chart-outline',
+                  label: 'Show Result',
+                  onPress: () =>
+                    router.push({
+                      pathname: '/(app)/tournament-result/[id]',
+                      params: { id: item.id },
+                    }),
+                },
+              ]}
             />
           )}
           ListHeaderComponent={
@@ -214,30 +300,29 @@ export default function ExploreScreen() {
 
 function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
-    safe: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    header: {
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      paddingBottom: 6,
+    safe: { flex: 1, backgroundColor: colors.background },
+    header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 6 },
+
+    // Search row
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      marginBottom: 8,
     },
     searchWrap: {
+      flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.surface,
-      marginHorizontal: 20,
-      marginBottom: 8,
       borderRadius: 12,
       paddingHorizontal: 12,
       borderWidth: 1,
       borderColor: colors.border,
       minHeight: 44,
     },
-    searchIcon: {
-      marginRight: 8,
-    },
+    searchIcon: { marginRight: 8 },
     searchInput: {
       flex: 1,
       fontSize: 14,
@@ -245,40 +330,82 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       fontFamily: 'Inter_Regular',
       paddingVertical: 10,
     },
-    statusWrap: {
+    clearBtn: { padding: 2 },
+    filterBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
       backgroundColor: colors.surface,
-      borderColor: colors.border,
-      borderRadius: 14,
       borderWidth: 1,
-      flexDirection: 'row',
-      marginHorizontal: 20,
-      marginBottom: 2,
-      padding: 3,
-    },
-    statusOption: {
+      borderColor: colors.border,
       alignItems: 'center',
-      borderRadius: 9,
-      flex: 1,
-      minHeight: 32,
       justifyContent: 'center',
     },
-    statusOptionActive: {
-      backgroundColor: colors.primaryLight,
+    filterBadge: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      borderWidth: 1.5,
+      borderColor: colors.surface,
     },
-    cityScroll: {
-      flexGrow: 0,
+
+    // Filter panel
+    filterPanel: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      marginHorizontal: 16,
+      marginBottom: 10,
+      paddingHorizontal: 14,
+      paddingTop: 12,
+      paddingBottom: 14,
+      gap: 4,
+    },
+    filterPanelHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    filterLabel: {
+      marginTop: 8,
+      marginBottom: 6,
+      letterSpacing: 0.5,
+    },
+    statusWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    statusChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
     },
     cityRow: {
-      paddingHorizontal: 20,
-      paddingVertical: 6,
       gap: 6,
-      alignItems: 'center',
+      paddingBottom: 2,
     },
     cityChip: {
       paddingHorizontal: 12,
-      paddingVertical: 5,
+      paddingVertical: 6,
       borderRadius: 20,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.background,
       borderWidth: 1,
       borderColor: colors.border,
     },
@@ -286,21 +413,12 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderColor: colors.primary,
       backgroundColor: colors.primaryLight,
     },
-    countLabel: {
-      paddingBottom: 8,
-    },
-    list: {
-      paddingHorizontal: 20,
-      paddingTop: 8,
-    },
-    centered: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      gap: 6,
-    },
-    emptyTitle: {
-      marginTop: 8,
-    },
+
+    // List
+    countLabel: { paddingBottom: 8 },
+    list: { paddingHorizontal: 16, paddingTop: 8 },
+    skeletonList: { paddingHorizontal: 16, paddingTop: 8 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 6 },
+    emptyTitle: { marginTop: 8 },
   });
 }

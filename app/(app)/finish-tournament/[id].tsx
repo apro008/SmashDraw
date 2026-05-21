@@ -1,18 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '~/components/AppButton';
 import { AppText } from '~/components/AppText';
+import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { isDoublesCategory } from '~/constants/TournamentCategories';
 import { useTheme } from '~/hooks/useTheme';
 import {
@@ -192,8 +186,17 @@ export default function FinishTournamentResultScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.loading}>
-          <ActivityIndicator color={colors.primary} />
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <AppText variant="title" weight="bold">
+            Finish Tournament
+          </AppText>
+          <View style={styles.iconButton} />
+        </View>
+        <View style={styles.loadingScroll}>
+          <SkeletonLoader variant="detail" count={3} />
         </View>
       </SafeAreaView>
     );
@@ -674,6 +677,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       flex: 1,
       justifyContent: 'center',
+    },
+    loadingScroll: {
+      paddingHorizontal: 18,
     },
     empty: {
       alignItems: 'center',

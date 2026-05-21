@@ -1,20 +1,47 @@
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
-import { useMemo, useState } from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { useRef, useEffect, useMemo, useState } from 'react';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '~/hooks/useTheme';
 import { AppText } from './AppText';
 import { Tournament, TournamentStatus } from '~/types';
 
-const STATUS_CONFIG: Record<TournamentStatus, { label: string; color: string; bg: string }> = {
-  open: { label: 'Open', color: '#16A34A', bg: '#DCFCE7' },
-  ongoing: { label: 'Live', color: '#D97706', bg: '#FEF3C7' },
-  paused: { label: 'Paused', color: '#7C3AED', bg: '#EDE9FE' },
-  completed: { label: 'Ended', color: '#6B7280', bg: '#F3F4F6' },
-  draft: { label: 'Draft', color: '#6B7280', bg: '#F3F4F6' },
-  cancelled: { label: 'Cancelled', color: '#DC2626', bg: '#FEE2E2' },
+// ─── Status config ─────────────────────────────────────────────────────────────
+// Solid colored pill with white text; "Ended" uses a light neutral.
+const STATUS_CONFIG: Record<
+  TournamentStatus,
+  { label: string; color: string; bg: string; dot?: boolean }
+> = {
+  open: { label: 'Open', color: '#fff', bg: '#16A34A' },
+  ongoing: { label: 'Live', color: '#fff', bg: '#EA580C', dot: true },
+  paused: { label: 'Paused', color: '#fff', bg: '#7C3AED' },
+  completed: { label: 'Ended', color: '#52525B', bg: '#F4F4F5' },
+  draft: { label: 'Draft', color: '#fff', bg: '#374151' },
+  cancelled: { label: 'Cancelled', color: '#fff', bg: '#DC2626' },
 };
 
-const GRADIENT_COLORS = ['#1A73E8', '#0D47A1', '#7C3AED', '#BE185D', '#065F46', '#B45309'];
+// Per-category type theming — used by CategoryRow in the detail screen too
+export const CATEGORY_TYPE: Record<string, { color: string; abbr: string }> = {
+  "Men's Singles": { color: '#1A73E8', abbr: 'MS' },
+  "Women's Singles": { color: '#EC4899', abbr: 'WS' },
+  "Men's Doubles": { color: '#0EA5E9', abbr: 'MD' },
+  "Women's Doubles": { color: '#F472B6', abbr: 'WD' },
+  'Mixed Doubles': { color: '#8B5CF6', abbr: 'XD' },
+  "Boys' Singles": { color: '#06B6D4', abbr: 'BS' },
+  "Girls' Singles": { color: '#F43F5E', abbr: 'GS' },
+  "Boys' Under-15": { color: '#10B981', abbr: 'B15' },
+  "Girls' Under-15": { color: '#14B8A6', abbr: 'G15' },
+  'Veterans Singles': { color: '#F59E0B', abbr: 'VET' },
+};
+
+const BANNER_COLORS = ['#1A73E8', '#0D47A1', '#7C3AED', '#BE185D', '#065F46', '#B45309'];
+
+interface CardAction {
+  label: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  loading?: boolean;
+  destructive?: boolean;
+  onPress: () => void;
+}
 
 interface Props {
   tournament: Tournament;
@@ -25,23 +52,34 @@ interface Props {
   menuActions?: CardAction[];
 }
 
-interface CardAction {
-  label: string;
-  icon?: keyof typeof Ionicons.glyphMap;
-  loading?: boolean;
-  destructive?: boolean;
-  onPress: () => void;
-}
-
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
 function hashColor(str: string) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  return GRADIENT_COLORS[Math.abs(hash) % GRADIENT_COLORS.length];
+  return BANNER_COLORS[Math.abs(hash) % BANNER_COLORS.length];
+}
+
+// Pulsing dot shown inside the "Live" status badge
+function LiveDot() {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.15, duration: 500, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 500, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [pulse]);
+  return (
+    <Animated.View
+      style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', opacity: pulse, marginRight: 5 }}
+    />
+  );
 }
 
 export function TournamentCard({
@@ -55,161 +93,196 @@ export function TournamentCard({
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const onPressIn = () =>
+    Animated.spring(scaleAnim, { toValue: 0.965, useNativeDriver: true, friction: 8, tension: 150 }).start();
+  const onPressOut = () =>
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 8, tension: 150 }).start();
+
   const statusCfg = STATUS_CONFIG[tournament.status] ?? STATUS_CONFIG.open;
-  const accentColor = hashColor(tournament.id);
+  const bannerColor = hashColor(tournament.id);
   const dateRange =
     tournament.start_date === tournament.end_date
       ? formatDate(tournament.start_date)
       : `${formatDate(tournament.start_date)} – ${formatDate(tournament.end_date)}`;
+  const entryFee =
+    tournament.categories && tournament.categories.length > 0
+      ? Math.min(...tournament.categories.map((c) => c.entry_fee))
+      : null;
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
-      {/* Color banner */}
-      <View style={[styles.banner, { backgroundColor: accentColor }]}>
-        <View style={styles.courtLines}>
-          <View style={styles.courtCenterLine} />
-          <View style={styles.courtNet} />
-          <View style={[styles.courtServiceLine, { left: '24%' }]} />
-          <View style={[styles.courtServiceLine, { right: '24%' }]} />
-        </View>
-        <View style={styles.shuttleMark}>
-          <View style={styles.shuttleCork} />
-          <View style={styles.shuttleFeathers}>
-            <View style={styles.feather} />
-            <View style={[styles.feather, styles.featherMid]} />
-            <View style={styles.feather} />
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        activeOpacity={1}
+      >
+        {/* ── Coloured banner ──────────────────────────────── */}
+        <View style={[styles.banner, { backgroundColor: bannerColor }]}>
+          {/* Subtle badminton court lines */}
+          <View style={styles.courtLines}>
+            <View style={styles.courtCenterLine} />
+            <View style={styles.courtNet} />
+            <View style={[styles.courtServiceLine, { left: '24%' }]} />
+            <View style={[styles.courtServiceLine, { right: '24%' }]} />
+          </View>
+
+          {/* Shuttlecock watermark — feathers fan at top, cork at bottom */}
+          <View style={styles.shuttleMark}>
+            <View style={styles.shuttleFeathers}>
+              <View style={[styles.feather, { transform: [{ rotate: '-14deg' }] }]} />
+              <View style={[styles.feather, { transform: [{ rotate: '-7deg' }] }]} />
+              <View style={[styles.feather, styles.featherTall]} />
+              <View style={[styles.feather, { transform: [{ rotate: '7deg' }] }]} />
+              <View style={[styles.feather, { transform: [{ rotate: '14deg' }] }]} />
+            </View>
+            <View style={styles.shuttleCork} />
+          </View>
+
+          {/* Sport label — bottom-left */}
+          <View style={styles.bannerSportLabel}>
+            <MaterialCommunityIcons name="badminton" size={16} color="rgba(255,255,255,0.92)" />
+            <AppText variant="caption" weight="semiBold" color="rgba(255,255,255,0.92)">
+              Badminton
+            </AppText>
+          </View>
+
+          {/* Status pill — bottom-right of banner */}
+          <View style={[styles.statusPill, { backgroundColor: statusCfg.bg }]}>
+            {statusCfg.dot && <LiveDot />}
+            <AppText variant="xs" weight="bold" color={statusCfg.color}>
+              {statusCfg.label}
+            </AppText>
           </View>
         </View>
-        <View style={styles.bannerTitle}>
-          <Ionicons name="tennisball" size={16} color="rgba(255,255,255,0.92)" />
-          <AppText variant="caption" weight="semiBold" color="rgba(255,255,255,0.92)">
-            Badminton
-          </AppText>
-        </View>
-        <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
-          <AppText variant="xs" weight="semiBold" color={statusCfg.color}>
-            {statusCfg.label}
-          </AppText>
-        </View>
-      </View>
 
-      <View style={styles.body}>
-        {menuActions && menuActions.length > 0 ? (
-          <TouchableOpacity
-            style={styles.menuButton}
-            onPress={(event) => {
-              event.stopPropagation();
-              setMenuOpen((current) => !current);
-            }}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="ellipsis-vertical" size={18} color={colors.textSecondary} />
-          </TouchableOpacity>
-        ) : null}
+        {/* ── Body ─────────────────────────────────────────── */}
+        <View style={styles.body}>
+          {/* Menu button */}
+          {menuActions && menuActions.length > 0 ? (
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="ellipsis-vertical" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ) : null}
 
-        {menuOpen && menuActions && menuActions.length > 0 ? (
-          <View style={styles.menu}>
-            {menuActions.map((item) => (
-              <TouchableOpacity
-                key={item.label}
-                style={styles.menuItem}
-                disabled={item.loading}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  setMenuOpen(false);
-                  item.onPress();
-                }}
-                activeOpacity={0.75}
-              >
-                {item.icon ? (
-                  <Ionicons
-                    name={item.icon}
-                    size={16}
-                    color={item.destructive ? colors.danger : colors.text}
-                  />
-                ) : null}
-                <AppText
-                  variant="label"
-                  weight="medium"
-                  color={item.destructive ? colors.danger : colors.text}
+          {/* Dropdown menu */}
+          {menuOpen && menuActions && menuActions.length > 0 ? (
+            <View style={styles.menu}>
+              {menuActions.map((item) => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={styles.menuItem}
+                  disabled={item.loading}
+                  onPress={(e) => { e.stopPropagation(); setMenuOpen(false); item.onPress(); }}
+                  activeOpacity={0.75}
                 >
-                  {item.label}
-                </AppText>
-              </TouchableOpacity>
-            ))}
-          </View>
-        ) : null}
+                  {item.icon ? (
+                    <Ionicons
+                      name={item.icon}
+                      size={15}
+                      color={item.destructive ? colors.danger : colors.text}
+                    />
+                  ) : null}
+                  <AppText
+                    variant="label"
+                    weight="medium"
+                    color={item.destructive ? colors.danger : colors.text}
+                  >
+                    {item.label}
+                  </AppText>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
 
-        <AppText variant="title" weight="semiBold" numberOfLines={1}>
-          {tournament.title}
-        </AppText>
-
-        <View style={styles.row}>
-          <Ionicons name="location-outline" size={13} color={colors.textMuted} />
-          <AppText variant="caption" color={colors.textSecondary} style={styles.rowText}>
-            {tournament.venue}, {tournament.city}
+          <AppText variant="title" weight="semiBold" numberOfLines={1}>
+            {tournament.title}
           </AppText>
-        </View>
 
-        <View style={styles.row}>
-          <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
-          <AppText variant="caption" color={colors.textSecondary} style={styles.rowText}>
-            {dateRange}
-          </AppText>
-        </View>
-
-        {!compact && tournament.categories && tournament.categories.length > 0 && (
-          <View style={styles.categories}>
-            {tournament.categories.slice(0, 3).map((cat) => (
-              <View
-                key={cat.id}
-                style={[styles.catBadge, { backgroundColor: colors.primaryLight }]}
-              >
-                <AppText variant="xs" weight="medium" color={colors.primary}>
-                  {cat.name}
-                </AppText>
-              </View>
-            ))}
-            {tournament.categories.length > 3 && (
-              <AppText variant="xs" color={colors.textMuted}>
-                +{tournament.categories.length - 3} more
-              </AppText>
-            )}
+          <View style={styles.row}>
+            <Ionicons name="location-outline" size={13} color={colors.textMuted} />
+            <AppText variant="caption" color={colors.textSecondary} style={styles.rowText} numberOfLines={1}>
+              {tournament.venue}, {tournament.city}
+            </AppText>
           </View>
-        )}
 
-        <View style={styles.footer}>
-          {tournament.categories && tournament.categories.length > 0 ? (
-            <AppText variant="label" weight="semiBold" color={colors.primary}>
-              From ₹{Math.min(...tournament.categories.map((c) => c.entry_fee))}
+          <View style={styles.row}>
+            <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
+            <AppText variant="caption" color={colors.textSecondary} style={styles.rowText}>
+              {dateRange}
             </AppText>
-          ) : (
-            <AppText variant="label" color={colors.textMuted}>
-              Free entry
-            </AppText>
-          )}
-          {tournament.prize_pool && (
-            <View style={styles.prizeRow}>
-              <Ionicons name="gift-outline" size={12} color={colors.textMuted} />
-              <AppText variant="caption" color={colors.textMuted} style={{ marginLeft: 3 }}>
-                {tournament.prize_pool}
-              </AppText>
+          </View>
+
+          {/* Category type badges */}
+          {!compact && tournament.categories && tournament.categories.length > 0 && (
+            <View style={styles.categories}>
+              {tournament.categories.slice(0, 4).map((cat) => {
+                const typeCfg = CATEGORY_TYPE[cat.name];
+                const catColor = typeCfg?.color ?? colors.primary;
+                return (
+                  <View
+                    key={cat.id}
+                    style={[
+                      styles.catBadge,
+                      { backgroundColor: catColor + '18', borderColor: catColor + '50' },
+                    ]}
+                  >
+                    <AppText variant="xs" weight="semiBold" color={catColor}>
+                      {typeCfg?.abbr ?? cat.name}
+                    </AppText>
+                  </View>
+                );
+              })}
+              {tournament.categories.length > 4 && (
+                <AppText variant="xs" color={colors.textMuted}>
+                  +{tournament.categories.length - 4}
+                </AppText>
+              )}
             </View>
           )}
-        </View>
 
-        {action || secondaryAction ? (
-          <View style={styles.actionsRow}>
-            {action ? (
-              <CardActionButton action={action} styles={styles} colors={colors} primary />
-            ) : null}
-            {secondaryAction ? (
-              <CardActionButton action={secondaryAction} styles={styles} colors={colors} />
+          {/* Footer */}
+          <View style={styles.footer}>
+            {entryFee !== null ? (
+              <AppText variant="label" weight="semiBold" color={bannerColor}>
+                From ₹{entryFee}
+              </AppText>
+            ) : (
+              <AppText variant="label" color={colors.textMuted}>
+                Free entry
+              </AppText>
+            )}
+            {tournament.prize_pool ? (
+              <View style={styles.prizeRow}>
+                <Ionicons name="gift-outline" size={12} color={colors.textMuted} />
+                <AppText variant="caption" color={colors.textMuted} style={{ marginLeft: 3 }}>
+                  {tournament.prize_pool}
+                </AppText>
+              </View>
             ) : null}
           </View>
-        ) : null}
-      </View>
-    </TouchableOpacity>
+
+          {/* Action buttons */}
+          {(action || secondaryAction) ? (
+            <View style={styles.actionsRow}>
+              {action ? (
+                <CardActionButton action={action} colors={colors} styles={styles} primary bannerColor={bannerColor} />
+              ) : null}
+              {secondaryAction ? (
+                <CardActionButton action={secondaryAction} colors={colors} styles={styles} bannerColor={bannerColor} />
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -218,28 +291,30 @@ function CardActionButton({
   colors,
   primary,
   styles,
+  bannerColor,
 }: {
   action: CardAction;
   colors: ReturnType<typeof useTheme>['colors'];
   primary?: boolean;
   styles: ReturnType<typeof makeStyles>;
+  bannerColor: string;
 }) {
-  const fg = primary ? '#fff' : action.destructive ? colors.danger : colors.primary;
+  const fg = primary ? '#fff' : action.destructive ? colors.danger : bannerColor;
   return (
     <TouchableOpacity
       style={[
         styles.actionButton,
-        primary ? styles.primaryAction : styles.secondaryAction,
-        action.destructive && !primary ? styles.destructiveAction : null,
+        primary
+          ? [styles.primaryAction, { backgroundColor: bannerColor, borderColor: bannerColor }]
+          : action.destructive
+            ? styles.destructiveAction
+            : [styles.secondaryAction, { borderColor: bannerColor }],
       ]}
-      onPress={(event) => {
-        event.stopPropagation();
-        action.onPress();
-      }}
+      onPress={(e) => { e.stopPropagation(); action.onPress(); }}
       disabled={action.loading}
       activeOpacity={0.85}
     >
-      {action.icon ? <Ionicons name={action.icon} size={17} color={fg} /> : null}
+      {action.icon ? <Ionicons name={action.icon} size={15} color={fg} /> : null}
       <AppText variant="label" weight="semiBold" color={fg}>
         {action.label}
       </AppText>
@@ -259,124 +334,136 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       shadowRadius: 8,
       elevation: 3,
     },
+
+    // Banner
     banner: {
-      height: 80,
+      height: 88,
       justifyContent: 'flex-end',
       padding: 10,
       position: 'relative',
     },
     courtLines: {
-      borderColor: 'rgba(255,255,255,0.22)',
-      borderRadius: 10,
-      borderWidth: 1,
-      bottom: 10,
-      left: 12,
-      opacity: 0.9,
       position: 'absolute',
+      top: 10,
+      left: 12,
       right: 58,
-      top: 12,
+      bottom: 10,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.22)',
+      borderRadius: 8,
+      overflow: 'hidden',
     },
     courtCenterLine: {
-      backgroundColor: 'rgba(255,255,255,0.2)',
+      position: 'absolute',
+      top: 0,
       bottom: 0,
       left: '50%',
-      position: 'absolute',
-      top: 0,
       width: 1,
+      backgroundColor: 'rgba(255,255,255,0.18)',
     },
     courtNet: {
-      backgroundColor: 'rgba(255,255,255,0.32)',
-      height: 1,
-      left: 0,
       position: 'absolute',
-      right: 0,
       top: '50%',
+      left: 0,
+      right: 0,
+      height: 1,
+      backgroundColor: 'rgba(255,255,255,0.28)',
     },
     courtServiceLine: {
-      backgroundColor: 'rgba(255,255,255,0.18)',
-      bottom: 0,
       position: 'absolute',
       top: 0,
+      bottom: 0,
       width: 1,
+      backgroundColor: 'rgba(255,255,255,0.14)',
     },
     shuttleMark: {
-      alignItems: 'center',
-      justifyContent: 'center',
       position: 'absolute',
-      right: 12,
-      top: 12,
-      transform: [{ rotate: '-18deg' }],
-    },
-    shuttleCork: {
-      backgroundColor: '#FDE68A',
-      borderRadius: 7,
-      height: 14,
-      width: 14,
+      right: 14,
+      top: 8,
+      alignItems: 'center',
+      opacity: 0.28,
+      transform: [{ rotate: '15deg' }],
     },
     shuttleFeathers: {
       flexDirection: 'row',
+      alignItems: 'flex-end',
       gap: 2,
-      marginTop: -1,
     },
     feather: {
-      backgroundColor: 'rgba(255,255,255,0.9)',
-      borderRadius: 5,
-      height: 24,
-      width: 8,
+      width: 7,
+      height: 26,
+      borderTopLeftRadius: 4,
+      borderTopRightRadius: 4,
+      borderBottomLeftRadius: 1,
+      borderBottomRightRadius: 1,
+      backgroundColor: 'rgba(255,255,255,0.95)',
     },
-    featherMid: {
-      height: 29,
+    featherTall: {
+      height: 32,
     },
-    bannerTitle: {
-      alignItems: 'center',
-      flexDirection: 'row',
-      gap: 5,
-      left: 22,
+    shuttleCork: {
+      width: 16,
+      height: 10,
+      borderRadius: 8,
+      backgroundColor: '#FDE68A',
+      marginTop: -1,
+    },
+    bannerSportLabel: {
       position: 'absolute',
-      top: 18,
+      bottom: 10,
+      left: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
     },
-    statusBadge: {
-      alignSelf: 'flex-start',
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 6,
+    statusPill: {
+      position: 'absolute',
+      bottom: 10,
+      right: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderRadius: 20,
     },
+
+    // Body
     body: {
       padding: 14,
       gap: 5,
       position: 'relative',
     },
     menuButton: {
-      alignItems: 'center',
-      borderRadius: 16,
-      height: 32,
-      justifyContent: 'center',
       position: 'absolute',
       right: 10,
       top: 10,
       width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
       zIndex: 3,
     },
     menu: {
-      backgroundColor: colors.card,
-      borderColor: colors.border,
-      borderRadius: 12,
-      borderWidth: 1,
-      elevation: 8,
-      minWidth: 170,
-      overflow: 'hidden',
       position: 'absolute',
       right: 12,
+      top: 44,
+      backgroundColor: colors.card,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 12,
+      minWidth: 170,
+      overflow: 'hidden',
+      elevation: 8,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 3 },
       shadowOpacity: 1,
       shadowRadius: 10,
-      top: 42,
       zIndex: 4,
     },
     menuItem: {
-      alignItems: 'center',
       flexDirection: 'row',
+      alignItems: 'center',
       gap: 9,
       minHeight: 44,
       paddingHorizontal: 12,
@@ -386,9 +473,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       gap: 4,
     },
-    rowText: {
-      flex: 1,
-    },
+    rowText: { flex: 1 },
     categories: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -399,6 +484,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: 6,
+      borderWidth: 1,
     },
     footer: {
       flexDirection: 'row',
@@ -406,7 +492,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       marginTop: 6,
       paddingTop: 10,
-      borderTopWidth: 1,
+      borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.border,
     },
     prizeRow: {
@@ -414,20 +500,19 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
     },
     actionsRow: {
-      alignItems: 'center',
       flexDirection: 'row',
       gap: 8,
-      marginTop: 10,
+      marginTop: 8,
     },
     actionButton: {
-      alignItems: 'center',
-      borderRadius: 10,
-      borderWidth: 1,
       flex: 1,
       flexDirection: 'row',
-      gap: 6,
+      alignItems: 'center',
       justifyContent: 'center',
+      gap: 6,
       paddingVertical: 10,
+      borderRadius: 10,
+      borderWidth: 1.5,
     },
     primaryAction: {
       backgroundColor: colors.primary,
@@ -438,6 +523,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderColor: colors.primary,
     },
     destructiveAction: {
+      backgroundColor: 'transparent',
       borderColor: colors.danger,
     },
   });

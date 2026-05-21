@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Stack, Redirect, router } from 'expo-router';
-import { View, ActivityIndicator } from 'react-native';
+import { View } from 'react-native';
+import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { useSession } from '~/providers/AuthProvider';
 import { useAuthStore } from '~/store/useAuthStore';
 import { useTheme } from '~/hooks/useTheme';
@@ -18,8 +19,8 @@ export default function AppLayout() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={{ flex: 1, padding: 20, paddingTop: 72, backgroundColor: colors.background }}>
+        <SkeletonLoader variant="detail" count={2} />
       </View>
     );
   }
