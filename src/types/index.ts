@@ -1,17 +1,7 @@
 export type UserRole = 'player' | 'organizer' | 'admin';
 export type SkillLevel = 'beginner' | 'intermediate' | 'advanced' | 'open';
 export type TournamentStatus = 'draft' | 'open' | 'ongoing' | 'paused' | 'completed' | 'cancelled';
-export type CategoryName =
-  | "Men's Singles"
-  | "Women's Singles"
-  | "Men's Doubles"
-  | "Women's Doubles"
-  | 'Mixed Doubles'
-  | "Boys' Singles"
-  | "Girls' Singles"
-  | "Boys' Under-15"
-  | "Girls' Under-15"
-  | 'Veterans Singles';
+export type CategoryName = string;
 export type RegistrationStatus = 'pending' | 'approved' | 'rejected' | 'waitlisted';
 export type Gender = 'male' | 'female' | 'other';
 

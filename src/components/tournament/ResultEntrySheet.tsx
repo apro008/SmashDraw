@@ -3,7 +3,21 @@ import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '~/components/AppButton';
 import { AppText } from '~/components/AppText';
+import { ContestantPicker, ManualContestantInput } from '~/components/tournament/ContestantPicker';
 import { isDoublesCategory } from '~/constants/TournamentCategories';
+import {
+  buildContestants,
+  createGuestContestant,
+  findContestantId,
+  type Contestant,
+} from '~/lib/contestants';
+import {
+  createEmptyGames,
+  gamesFromScoreText,
+  hasPartialGame,
+  summarizeScore,
+  type GameScore,
+} from '~/lib/matchScore';
 import {
   saveTournamentResult,
   TournamentRegistrationDetails,
@@ -23,14 +37,6 @@ interface ResultEntrySheetProps {
   onSaved: () => void;
 }
 
-interface Contestant {
-  id: string;
-  userId: string;
-  categoryId: string;
-  name: string;
-  detail: string;
-}
-
 export function ResultEntrySheet({
   initialResult,
   onClose,
@@ -46,16 +52,21 @@ export function ResultEntrySheet({
 
   const categories = useMemo(() => tournament.categories ?? [], [tournament.categories]);
   const [category, setCategory] = useState<TournamentCategory | null>(categories[0] ?? null);
-  const contestants = useMemo(
+  const [guests, setGuests] = useState<Contestant[]>([]);
+  const registeredContestants = useMemo(
     () => buildContestants(registrations, category?.id ?? null),
     [category?.id, registrations]
   );
+  const contestants = useMemo(
+    () => [
+      ...registeredContestants,
+      ...guests.filter((guest) => !category?.id || guest.categoryId === category.id),
+    ],
+    [category?.id, guests, registeredContestants]
+  );
   const [player1Id, setPlayer1Id] = useState('');
   const [player2Id, setPlayer2Id] = useState('');
-  const [winnerSide, setWinnerSide] = useState<1 | 2>(1);
-  const [player1Score, setPlayer1Score] = useState('');
-  const [player2Score, setPlayer2Score] = useState('');
-  const [scoreText, setScoreText] = useState('');
+  const [games, setGames] = useState<GameScore[]>(createEmptyGames);
   const [prizeMoney, setPrizeMoney] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -67,36 +78,60 @@ export function ResultEntrySheet({
       categories.find((item) => item.id === initialResult?.category_id) ?? categories[0] ?? null;
     setCategory(nextCategory);
     const nextContestants = buildContestants(registrations, nextCategory?.id ?? null);
-    const nextPlayer1Id =
-      findContestantId(nextContestants, initialResult?.player1_id, initialResult?.player1_name) ??
-      nextContestants[0]?.id ??
-      '';
-    const nextPlayer2Id =
-      findContestantId(nextContestants, initialResult?.player2_id, initialResult?.player2_name) ??
-      nextContestants.find((item) => item.id !== nextPlayer1Id)?.id ??
-      '';
+    // A saved result can name players who never registered — bring them back as manual entries.
+    const nextGuests: Contestant[] = [];
+    const resolveSide = (userId?: string | null, name?: string | null, excludeId?: string) => {
+      const matched = findContestantId(nextContestants, userId, name);
+      if (matched && matched !== excludeId) return matched;
+      if (initialResult && name) {
+        const guest = createGuestContestant(name, nextCategory?.id ?? null, userId ?? null);
+        nextGuests.push(guest);
+        return guest.id;
+      }
+      return nextContestants.find((item) => item.id !== excludeId)?.id ?? '';
+    };
+    const nextPlayer1Id = resolveSide(initialResult?.player1_id, initialResult?.player1_name);
+    const nextPlayer2Id = resolveSide(
+      initialResult?.player2_id,
+      initialResult?.player2_name,
+      nextPlayer1Id
+    );
+    setGuests(nextGuests);
     setPlayer1Id(nextPlayer1Id);
     setPlayer2Id(nextPlayer2Id);
-    setWinnerSide(initialResult?.winner_id === initialResult?.player2_id ? 2 : 1);
-    setPlayer1Score(initialResult?.player1_score?.toString() ?? '');
-    setPlayer2Score(initialResult?.player2_score?.toString() ?? '');
-    setScoreText(initialResult?.score ?? '');
+    setGames(initialResult ? gamesFromScoreText(initialResult.score) : createEmptyGames());
     setPrizeMoney(initialResult?.prize_money_received?.toString() ?? '');
     setNotes(initialResult?.result_notes ?? '');
   }, [categories, initialResult, registrations, visible]);
 
-  useEffect(() => {
-    if (initialResult) return;
-    setPlayer1Id(contestants[0]?.id ?? '');
-    setPlayer2Id(contestants[1]?.id ?? '');
-    setWinnerSide(1);
-  }, [contestants, initialResult]);
+  const handleSelectCategory = (next: TournamentCategory) => {
+    if (next.id === category?.id) return;
+    setCategory(next);
+    const nextContestants = buildContestants(registrations, next.id);
+    setPlayer1Id(nextContestants[0]?.id ?? '');
+    setPlayer2Id(nextContestants[1]?.id ?? '');
+  };
+
+  const handleAddGuest = (name: string) => {
+    const guest = createGuestContestant(name, category?.id ?? null);
+    setGuests((current) => [...current, guest]);
+    // Drop the new name straight into whichever side is still empty.
+    if (!player1Id) setPlayer1Id(guest.id);
+    else if (!player2Id) setPlayer2Id(guest.id);
+  };
+
+  const handleRemoveGuest = (guestId: string) => {
+    setGuests((current) => current.filter((guest) => guest.id !== guestId));
+    if (player1Id === guestId) setPlayer1Id('');
+    if (player2Id === guestId) setPlayer2Id('');
+  };
 
   const player1 = contestants.find((item) => item.id === player1Id) ?? null;
   const player2 = contestants.find((item) => item.id === player2Id) ?? null;
-  const winner = winnerSide === 1 ? player1 : player2;
-  const score1 = Number(player1Score);
-  const score2 = Number(player2Score);
+  const scoreSummary = useMemo(() => summarizeScore(games), [games]);
+  const partialGame = hasPartialGame(games);
+  const winner =
+    scoreSummary?.winnerSide === 1 ? player1 : scoreSummary?.winnerSide === 2 ? player2 : null;
   const prize = prizeMoney.trim() ? Number(prizeMoney) : null;
   const canSave =
     !!user?.id &&
@@ -104,14 +139,23 @@ export function ResultEntrySheet({
     !!player1 &&
     !!player2 &&
     player1.id !== player2.id &&
-    Number.isFinite(score1) &&
-    Number.isFinite(score2) &&
-    score1 >= 0 &&
-    score2 >= 0 &&
+    !!scoreSummary &&
+    !partialGame &&
     (!prizeMoney.trim() || (prize !== null && Number.isFinite(prize) && prize >= 0));
 
+  const updateGameScore = (index: number, side: keyof GameScore, value: string) => {
+    const nextValue = value.replace(/[^\d]/g, '').slice(0, 2);
+    setGames((current) =>
+      current.map((game, gameIndex) =>
+        gameIndex === index ? { ...game, [side]: nextValue } : game
+      )
+    );
+  };
+
   const handleSave = async () => {
-    if (!canSave || !category || !player1 || !player2 || !winner || !user?.id) return;
+    if (!canSave || !category || !player1 || !player2 || !winner || !scoreSummary || !user?.id) {
+      return;
+    }
 
     setSaving(true);
     try {
@@ -124,9 +168,9 @@ export function ResultEntrySheet({
         player2Name: player2.name,
         winnerId: winner.userId,
         winnerName: winner.name,
-        player1Score: score1,
-        player2Score: score2,
-        scoreText: scoreText.trim() || undefined,
+        player1Score: scoreSummary.player1Games,
+        player2Score: scoreSummary.player2Games,
+        scoreText: scoreSummary.scoreText,
         prizeMoneyReceived: prize,
         notes: notes.trim() || null,
         uploadedBy: user.id,
@@ -141,7 +185,7 @@ export function ResultEntrySheet({
         title: initialResult ? 'Result updated' : 'Result uploaded',
         message: initialResult
           ? 'The latest scorecard is now visible to players.'
-          : 'Players can now view this match result.',
+          : 'This match result is now visible to players. Other matches are unaffected.',
       });
       onSaved();
       onClose();
@@ -161,14 +205,14 @@ export function ResultEntrySheet({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.header}>
-          <View>
+          <View style={{ flex: 1 }}>
             <AppText variant="title" weight="bold">
-              {isEditing ? 'Update Result' : 'Finish Match'}
+              {isEditing ? `Update Match #${initialResult?.match_number}` : 'Add Match Result'}
             </AppText>
             <AppText variant="caption" color={colors.textSecondary}>
               {isEditing
-                ? 'Edit score, winner, and prize details'
-                : 'Upload score, winner, and prize details'}
+                ? 'Only this match is changed — every other result stays as it is.'
+                : 'Upload the result of a single match without ending the tournament.'}
             </AppText>
           </View>
           <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeButton}>
@@ -186,7 +230,7 @@ export function ResultEntrySheet({
               return (
                 <Pressable
                   key={item.id}
-                  onPress={() => setCategory(item)}
+                  onPress={() => handleSelectCategory(item)}
                   style={[styles.chip, selected ? styles.chipActive : null]}
                 >
                   <AppText
@@ -208,97 +252,97 @@ export function ResultEntrySheet({
             <View style={styles.notice}>
               <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
               <AppText variant="caption" color={colors.textSecondary} style={{ flex: 1 }}>
-                At least two approved entries are needed in this category before a result can be
-                uploaded.
+                Fewer than two approved entries in this category. Add the missing players by name
+                below — they don&apos;t need a SmashDraw account.
               </AppText>
             </View>
-          ) : (
-            <>
-              <ContestantPicker
-                colors={colors}
-                contestants={contestants}
-                label="Side A"
-                selectedId={player1Id}
-                setSelectedId={setPlayer1Id}
-                styles={styles}
-              />
-              <ContestantPicker
-                colors={colors}
-                contestants={contestants}
-                excludedId={player1Id}
-                label="Side B"
-                selectedId={player2Id}
-                setSelectedId={setPlayer2Id}
-                styles={styles}
-              />
-            </>
-          )}
+          ) : null}
+          <ContestantPicker
+            contestants={contestants}
+            label="Side A"
+            onRemoveGuest={handleRemoveGuest}
+            onSelect={setPlayer1Id}
+            selectedId={player1Id}
+          />
+          <ContestantPicker
+            contestants={contestants}
+            excludedId={player1Id}
+            label="Side B"
+            onRemoveGuest={handleRemoveGuest}
+            onSelect={setPlayer2Id}
+            selectedId={player2Id}
+          />
+          <ManualContestantInput
+            isDoubles={isDoublesCategory(category?.name ?? '')}
+            onAdd={handleAddGuest}
+          />
 
           <AppText variant="label" weight="semiBold" color={colors.textMuted} style={styles.label}>
-            WINNER
+            SCORECARD
           </AppText>
-          <View style={styles.segment}>
-            <Pressable
-              disabled={!player1}
-              onPress={() => setWinnerSide(1)}
-              style={[styles.segmentItem, winnerSide === 1 ? styles.segmentActive : null]}
-            >
+          <View style={styles.scorecard}>
+            <View style={styles.scoreHeaderRow}>
               <AppText
-                variant="caption"
+                variant="xs"
                 weight="semiBold"
-                color={winnerSide === 1 ? colors.primary : colors.textSecondary}
+                color={colors.textMuted}
+                style={styles.sideCol}
               >
-                {player1?.name ?? 'Side A'}
+                SIDE
               </AppText>
-            </Pressable>
-            <Pressable
-              disabled={!player2}
-              onPress={() => setWinnerSide(2)}
-              style={[styles.segmentItem, winnerSide === 2 ? styles.segmentActive : null]}
-            >
-              <AppText
-                variant="caption"
-                weight="semiBold"
-                color={winnerSide === 2 ? colors.primary : colors.textSecondary}
-              >
-                {player2?.name ?? 'Side B'}
-              </AppText>
-            </Pressable>
-          </View>
-
-          <View style={styles.scoreRow}>
-            <Field
+              {[1, 2, 3].map((gameNumber) => (
+                <AppText
+                  key={gameNumber}
+                  variant="xs"
+                  weight="semiBold"
+                  color={colors.textMuted}
+                  style={styles.gameHeader}
+                >
+                  G{gameNumber}
+                </AppText>
+              ))}
+              <View style={styles.winCol} />
+            </View>
+            <ScoreRow
               colors={colors}
-              keyboardType="number-pad"
-              label="Side A score"
-              onChangeText={setPlayer1Score}
+              games={games}
+              isWinner={scoreSummary?.winnerSide === 1}
+              label={player1?.name ?? 'Side A'}
+              side="a"
               styles={styles}
-              value={player1Score}
+              updateGameScore={updateGameScore}
             />
-            <Field
+            <ScoreRow
               colors={colors}
-              keyboardType="number-pad"
-              label="Side B score"
-              onChangeText={setPlayer2Score}
+              games={games}
+              isWinner={scoreSummary?.winnerSide === 2}
+              label={player2?.name ?? 'Side B'}
+              side="b"
               styles={styles}
-              value={player2Score}
+              updateGameScore={updateGameScore}
             />
           </View>
+          {partialGame ? (
+            <AppText variant="caption" color={colors.danger} style={styles.helperText}>
+              Complete both scores for each game you enter.
+            </AppText>
+          ) : scoreSummary ? (
+            <AppText variant="caption" color={colors.textSecondary} style={styles.helperText}>
+              Winner: {winner?.name} · {scoreSummary.player1Games}-{scoreSummary.player2Games} games
+              ({scoreSummary.scoreText})
+            </AppText>
+          ) : (
+            <AppText variant="caption" color={colors.textMuted} style={styles.helperText}>
+              Enter at least one completed game with a clear winner.
+            </AppText>
+          )}
 
-          <Field
-            colors={colors}
-            label="Final score"
-            onChangeText={setScoreText}
-            placeholder={`${score1 || 0}-${score2 || 0}`}
-            styles={styles}
-            value={scoreText}
-          />
           <Field
             colors={colors}
             keyboardType="number-pad"
             label="Prize money received"
             onChangeText={setPrizeMoney}
-            placeholder="Amount in rupees"
+            placeholder="Amount in rupees (optional)"
             styles={styles}
             value={prizeMoney}
           />
@@ -307,7 +351,7 @@ export function ResultEntrySheet({
             label="Result details"
             multiline
             onChangeText={setNotes}
-            placeholder="Final notes, walkover reason, referee remarks..."
+            placeholder="Round name, walkover reason, referee remarks..."
             styles={styles}
             value={notes}
           />
@@ -317,7 +361,7 @@ export function ResultEntrySheet({
             loading={saving}
             onPress={handleSave}
             style={styles.submitButton}
-            title={isEditing ? 'Update Result' : 'Upload Result'}
+            title={isEditing ? 'Save Changes' : 'Upload Result'}
           />
         </ScrollView>
       </View>
@@ -325,55 +369,45 @@ export function ResultEntrySheet({
   );
 }
 
-function ContestantPicker({
+function ScoreRow({
   colors,
-  contestants,
-  excludedId,
+  games,
+  isWinner,
   label,
-  selectedId,
-  setSelectedId,
+  side,
   styles,
+  updateGameScore,
 }: {
   colors: ReturnType<typeof useTheme>['colors'];
-  contestants: Contestant[];
-  excludedId?: string;
+  games: GameScore[];
+  isWinner: boolean;
   label: string;
-  selectedId: string;
-  setSelectedId: (id: string) => void;
+  side: keyof GameScore;
   styles: ReturnType<typeof makeStyles>;
+  updateGameScore: (index: number, side: keyof GameScore, value: string) => void;
 }) {
   return (
-    <View style={styles.pickerBlock}>
-      <AppText variant="label" weight="medium" color={colors.textSecondary}>
-        {label}
-      </AppText>
-      <View style={styles.optionList}>
-        {contestants
-          .filter((item) => item.id !== excludedId)
-          .map((item) => {
-            const selected = selectedId === item.id;
-            return (
-              <Pressable
-                key={item.id}
-                onPress={() => setSelectedId(item.id)}
-                style={[styles.option, selected ? styles.optionActive : null]}
-              >
-                <View style={{ flex: 1 }}>
-                  <AppText variant="caption" weight="semiBold">
-                    {item.name}
-                  </AppText>
-                  {item.detail ? (
-                    <AppText variant="xs" color={colors.textMuted}>
-                      {item.detail}
-                    </AppText>
-                  ) : null}
-                </View>
-                {selected ? (
-                  <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
-                ) : null}
-              </Pressable>
-            );
-          })}
+    <View style={[styles.scoreEntryRow, isWinner ? styles.scoreEntryWinner : null]}>
+      <View style={styles.sideCol}>
+        <AppText variant="caption" weight="semiBold" numberOfLines={2}>
+          {label}
+        </AppText>
+      </View>
+      {games.map((game, index) => (
+        <TextInput
+          key={`${side}-${index}`}
+          keyboardType="number-pad"
+          maxLength={2}
+          onChangeText={(value) => updateGameScore(index, side, value)}
+          placeholder="-"
+          placeholderTextColor={colors.textMuted}
+          style={styles.scoreInput}
+          textAlign="center"
+          value={game[side]}
+        />
+      ))}
+      <View style={styles.winCol}>
+        {isWinner ? <Ionicons name="trophy" size={17} color={colors.success} /> : null}
       </View>
     </View>
   );
@@ -422,47 +456,6 @@ function Field({
   );
 }
 
-function findContestantId(contestants: Contestant[], userId?: string | null, name?: string | null) {
-  return (
-    contestants.find((item) => item.userId === userId)?.id ??
-    contestants.find((item) => item.name === name)?.id
-  );
-}
-
-function buildContestants(
-  registrations: TournamentRegistrationDetails[],
-  categoryId: string | null
-): Contestant[] {
-  return registrations
-    .filter((registration) => registration.status === 'approved')
-    .filter((registration) => !categoryId || registration.category_id === categoryId)
-    .map((registration) => {
-      const notes = parseRegistrationNotes(registration.notes);
-      const playerName = notes.playerName ?? registration.player?.name ?? 'Player';
-      const partnerName = notes.partnerName;
-      const isDoubles = isDoublesCategory(registration.category?.name ?? '');
-      return {
-        id: registration.id,
-        userId: registration.user_id,
-        categoryId: registration.category_id,
-        name: isDoubles && partnerName ? `${playerName} / ${partnerName}` : playerName,
-        detail: registration.player?.city ?? '',
-      };
-    });
-}
-
-function parseRegistrationNotes(notes: string | null) {
-  if (!notes) return {};
-  try {
-    return JSON.parse(notes) as {
-      playerName?: string;
-      partnerName?: string | null;
-    };
-  } catch {
-    return {};
-  }
-}
-
 function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     backdrop: {
@@ -483,8 +476,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       right: 0,
     },
     header: {
-      alignItems: 'center',
+      alignItems: 'flex-start',
       flexDirection: 'row',
+      gap: 10,
       justifyContent: 'space-between',
       marginBottom: 12,
     },
@@ -525,52 +519,64 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       gap: 8,
       padding: 12,
     },
-    pickerBlock: {
-      gap: 8,
-      marginTop: 10,
-    },
-    optionList: {
-      gap: 7,
-    },
-    option: {
-      alignItems: 'center',
+    scorecard: {
       backgroundColor: colors.surface,
       borderColor: colors.border,
-      borderRadius: 12,
+      borderRadius: 14,
       borderWidth: 1,
-      flexDirection: 'row',
-      gap: 10,
-      padding: 10,
-    },
-    optionActive: {
-      backgroundColor: colors.primaryLight,
-      borderColor: colors.primary,
-    },
-    segment: {
-      backgroundColor: colors.surface,
-      borderColor: colors.border,
-      borderRadius: 12,
-      borderWidth: 1,
-      flexDirection: 'row',
       overflow: 'hidden',
     },
-    segmentItem: {
+    scoreHeaderRow: {
       alignItems: 'center',
-      flex: 1,
-      justifyContent: 'center',
-      minHeight: 44,
-      paddingHorizontal: 8,
+      backgroundColor: colors.inputBg,
+      borderBottomColor: colors.border,
+      borderBottomWidth: 1,
+      flexDirection: 'row',
+      minHeight: 36,
+      paddingHorizontal: 10,
     },
-    segmentActive: {
+    scoreEntryRow: {
+      alignItems: 'center',
+      borderBottomColor: colors.border,
+      borderBottomWidth: 1,
+      flexDirection: 'row',
+      minHeight: 62,
+      paddingHorizontal: 10,
+    },
+    scoreEntryWinner: {
       backgroundColor: colors.primaryLight,
     },
-    scoreRow: {
-      flexDirection: 'row',
-      gap: 10,
+    sideCol: {
+      flex: 1.8,
+      paddingRight: 8,
+    },
+    gameHeader: {
+      textAlign: 'center',
+      width: 48,
+    },
+    scoreInput: {
+      backgroundColor: colors.inputBg,
+      borderColor: colors.border,
+      borderRadius: 10,
+      borderWidth: 1,
+      color: colors.text,
+      fontFamily: 'Inter_SemiBold',
+      fontSize: 16,
+      height: 42,
+      marginHorizontal: 3,
+      width: 42,
+    },
+    winCol: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 26,
+    },
+    helperText: {
+      marginTop: 8,
     },
     field: {
       flex: 1,
-      marginTop: 12,
+      marginTop: 14,
     },
     fieldLabel: {
       marginBottom: 6,

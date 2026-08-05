@@ -11,7 +11,9 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 
-const PRIMARY = '#1A73E8';
+// Matches the splash-icon artwork background (and app.json splash backgroundColor),
+// so the native splash hands over to this loader without a visible colour jump.
+const SPLASH_BG = '#01081A';
 const WHITE = '#FFFFFF';
 const WHITE_DIM = 'rgba(255,255,255,0.65)';
 
@@ -46,40 +48,40 @@ function ShuttlecockMark() {
 
 const mark = StyleSheet.create({
   root: {
-    width: 80,
-    height: 100,
+    width: 104,
+    height: 130,
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
   ring: {
     position: 'absolute',
     top: 0,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 5,
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    borderWidth: 6,
     borderColor: WHITE,
   },
   spineContainer: {
     position: 'absolute',
-    bottom: 14,
+    bottom: 18,
     left: 0,
     right: 0,
     alignItems: 'center',
   },
   spine: {
     position: 'absolute',
-    width: 3,
-    height: 58,
+    width: 4,
+    height: 75,
     borderRadius: 2,
     backgroundColor: WHITE,
     bottom: 0,
     transformOrigin: 'bottom center',
   },
   cork: {
-    width: 18,
-    height: 14,
-    borderRadius: 7,
+    width: 23,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: WHITE,
   },
 });
@@ -161,7 +163,7 @@ export function SplashLoader() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: PRIMARY,
+    backgroundColor: SPLASH_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -169,10 +171,10 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   logoBg: {
-    width: 120,
-    height: 120,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 160,
+    height: 160,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -9,7 +9,9 @@ export interface CategoryPreset {
 }
 
 export interface EditableCategoryPreset extends CategoryPreset {
+  id: string;
   enabled: boolean;
+  is_custom?: boolean;
   prizeEdited?: boolean;
 }
 
@@ -72,6 +74,7 @@ export function getAutoPrizeDistribution(entryFee: number, maxEntries: number) {
 export function createEditableCategoryPresets(): EditableCategoryPreset[] {
   return DEFAULT_TOURNAMENT_CATEGORIES.map((category, index) => ({
     ...category,
+    id: `preset-${index}`,
     enabled: index === 0,
     prize: getAutoPrizeDistribution(category.entry_fee, category.max_players),
   }));

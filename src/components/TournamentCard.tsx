@@ -4,6 +4,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '~/hooks/useTheme';
 import { AppText } from './AppText';
 import { Tournament, TournamentStatus } from '~/types';
+import { getEffectiveTournamentStatus } from '~/lib/tournaments';
 
 // ─── Status config ─────────────────────────────────────────────────────────────
 // Solid colored pill with white text; "Ended" uses a light neutral.
@@ -77,7 +78,14 @@ function LiveDot() {
   }, [pulse]);
   return (
     <Animated.View
-      style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', opacity: pulse, marginRight: 5 }}
+      style={{
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#fff',
+        opacity: pulse,
+        marginRight: 5,
+      }}
     />
   );
 }
@@ -96,11 +104,21 @@ export function TournamentCard({
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const onPressIn = () =>
-    Animated.spring(scaleAnim, { toValue: 0.965, useNativeDriver: true, friction: 8, tension: 150 }).start();
+    Animated.spring(scaleAnim, {
+      toValue: 0.965,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 150,
+    }).start();
   const onPressOut = () =>
-    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 8, tension: 150 }).start();
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 150,
+    }).start();
 
-  const statusCfg = STATUS_CONFIG[tournament.status] ?? STATUS_CONFIG.open;
+  const statusCfg = STATUS_CONFIG[getEffectiveTournamentStatus(tournament)] ?? STATUS_CONFIG.open;
   const bannerColor = hashColor(tournament.id);
   const dateRange =
     tournament.start_date === tournament.end_date
@@ -165,7 +183,10 @@ export function TournamentCard({
           {menuActions && menuActions.length > 0 ? (
             <TouchableOpacity
               style={styles.menuButton}
-              onPress={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+              onPress={(e) => {
+                e.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
               activeOpacity={0.75}
             >
               <Ionicons name="ellipsis-vertical" size={18} color={colors.textSecondary} />
@@ -180,7 +201,11 @@ export function TournamentCard({
                   key={item.label}
                   style={styles.menuItem}
                   disabled={item.loading}
-                  onPress={(e) => { e.stopPropagation(); setMenuOpen(false); item.onPress(); }}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setMenuOpen(false);
+                    item.onPress();
+                  }}
                   activeOpacity={0.75}
                 >
                   {item.icon ? (
@@ -208,7 +233,12 @@ export function TournamentCard({
 
           <View style={styles.row}>
             <Ionicons name="location-outline" size={13} color={colors.textMuted} />
-            <AppText variant="caption" color={colors.textSecondary} style={styles.rowText} numberOfLines={1}>
+            <AppText
+              variant="caption"
+              color={colors.textSecondary}
+              style={styles.rowText}
+              numberOfLines={1}
+            >
               {tournament.venue}, {tournament.city}
             </AppText>
           </View>
@@ -270,13 +300,24 @@ export function TournamentCard({
           </View>
 
           {/* Action buttons */}
-          {(action || secondaryAction) ? (
+          {action || secondaryAction ? (
             <View style={styles.actionsRow}>
               {action ? (
-                <CardActionButton action={action} colors={colors} styles={styles} primary bannerColor={bannerColor} />
+                <CardActionButton
+                  action={action}
+                  colors={colors}
+                  styles={styles}
+                  primary
+                  bannerColor={bannerColor}
+                />
               ) : null}
               {secondaryAction ? (
-                <CardActionButton action={secondaryAction} colors={colors} styles={styles} bannerColor={bannerColor} />
+                <CardActionButton
+                  action={secondaryAction}
+                  colors={colors}
+                  styles={styles}
+                  bannerColor={bannerColor}
+                />
               ) : null}
             </View>
           ) : null}
@@ -310,7 +351,10 @@ function CardActionButton({
             ? styles.destructiveAction
             : [styles.secondaryAction, { borderColor: bannerColor }],
       ]}
-      onPress={(e) => { e.stopPropagation(); action.onPress(); }}
+      onPress={(e) => {
+        e.stopPropagation();
+        action.onPress();
+      }}
       disabled={action.loading}
       activeOpacity={0.85}
     >

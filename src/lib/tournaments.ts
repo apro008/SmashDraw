@@ -7,12 +7,82 @@ import {
   TournamentMatchResult,
   TournamentStatus,
   UserProfile,
+  UserRole,
 } from '~/types';
 
 const TOURNAMENT_SELECT = `
   *,
   categories:tournament_categories(*)
 `;
+
+/** A tournament is treated as finished/closed this many days after its end date. */
+export const TOURNAMENT_CLOSE_AFTER_DAYS = 7;
+
+/** Parses a `YYYY-MM-DD` DB date into local midnight (avoids the UTC shift of `new Date(str)`). */
+export function parseDateOnly(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, (month ?? 1) - 1, day ?? 1);
+}
+
+/** Formats a Date as the `YYYY-MM-DD` string the DB expects, using local calendar values. */
+export function toDateOnlyString(date: Date) {
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export function startOfToday() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
+/** Local midnight of the day the tournament auto-closes. */
+export function getTournamentCloseDate(tournament: Pick<Tournament, 'end_date'>) {
+  const closeDate = parseDateOnly(tournament.end_date);
+  closeDate.setDate(closeDate.getDate() + TOURNAMENT_CLOSE_AFTER_DAYS);
+  return closeDate;
+}
+
+/** True once a week has passed since the last match day. Drafts/cancelled events never auto-close. */
+export function isTournamentClosed(
+  tournament: Pick<Tournament, 'end_date' | 'status'>,
+  now: Date = new Date()
+) {
+  if (tournament.status === 'draft' || tournament.status === 'cancelled') return false;
+  return now.getTime() >= getTournamentCloseDate(tournament).getTime();
+}
+
+/** Status to display: a tournament past its close window always reads as completed. */
+export function getEffectiveTournamentStatus(
+  tournament: Pick<Tournament, 'end_date' | 'status'>,
+  now: Date = new Date()
+): TournamentStatus {
+  return isTournamentClosed(tournament, now) ? 'completed' : tournament.status;
+}
+
+/** Whole days left before the tournament closes for the organizer (negative once closed). */
+export function getDaysUntilClose(
+  tournament: Pick<Tournament, 'end_date'>,
+  now: Date = new Date()
+) {
+  const startOfNow = new Date(now);
+  startOfNow.setHours(0, 0, 0, 0);
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.round(
+    (getTournamentCloseDate(tournament).getTime() - startOfNow.getTime()) / msPerDay
+  );
+}
+
+/**
+ * Persists the auto-close once the window has passed. Only organizers/admins can write this,
+ * so callers should skip it for players. Returns true when the status was changed.
+ */
+export async function closeTournamentIfDue(tournament: Tournament) {
+  if (tournament.status === 'completed' || !isTournamentClosed(tournament)) return false;
+  await updateTournamentStatus(tournament.id, 'completed');
+  return true;
+}
 
 export async function fetchOpenTournaments() {
   const { data, error } = await supabase
@@ -258,6 +328,35 @@ export async function updateTournamentResult(matchId: string, input: SaveTournam
     .eq('id', matchId);
 
   if (error) throw error;
+}
+
+export interface ResultAccess {
+  /** Can open the result sheet for this tournament at all. */
+  canManage: boolean;
+  /** True for organizers blocked by the close window (admins are never blocked). */
+  lockedByCloseWindow: boolean;
+  isAdmin: boolean;
+  isOwner: boolean;
+}
+
+/**
+ * Admins can always add or fix a result. The organizer can do so until the tournament
+ * auto-closes, one week after the last match day.
+ */
+export function getResultAccess(
+  tournament: Pick<Tournament, 'end_date' | 'organizer_id' | 'status'> | null,
+  userId: string | null | undefined,
+  role: UserRole | null | undefined
+): ResultAccess {
+  const isAdmin = role === 'admin';
+  const isOwner = !!tournament && !!userId && tournament.organizer_id === userId;
+  const closed = !!tournament && isTournamentClosed(tournament);
+  return {
+    canManage: !!tournament && (isAdmin || (isOwner && !closed)),
+    lockedByCloseWindow: isOwner && !isAdmin && closed,
+    isAdmin,
+    isOwner,
+  };
 }
 
 function sortTournamentCategories(tournament: Tournament) {

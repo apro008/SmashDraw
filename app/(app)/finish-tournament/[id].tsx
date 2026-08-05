@@ -7,11 +7,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '~/components/AppButton';
 import { AppText } from '~/components/AppText';
 import { SkeletonLoader } from '~/components/common/SkeletonLoader';
+import { ContestantPicker, ManualContestantInput } from '~/components/tournament/ContestantPicker';
 import { isDoublesCategory } from '~/constants/TournamentCategories';
 import { useTheme } from '~/hooks/useTheme';
+import { buildContestants, createGuestContestant, type Contestant } from '~/lib/contestants';
+import {
+  createEmptyGames,
+  hasPartialGame as hasIncompleteGame,
+  summarizeScore,
+  type GameScore,
+} from '~/lib/matchScore';
 import {
   fetchTournamentById,
   fetchTournamentRegistrations,
+  getResultAccess,
   saveTournamentResult,
   TournamentRegistrationDetails,
   updateTournamentStatus,
@@ -20,47 +29,22 @@ import { useAlert } from '~/providers/AlertProvider';
 import { useAuthStore } from '~/store/useAuthStore';
 import { Tournament, TournamentCategory } from '~/types';
 
-interface Contestant {
-  id: string;
-  userId: string;
-  categoryId: string;
-  name: string;
-  detail: string;
-}
-
-interface GameScore {
-  a: string;
-  b: string;
-}
-
-interface ScoreSummary {
-  player1Games: number;
-  player2Games: number;
-  player1Points: number;
-  player2Points: number;
-  scoreText: string;
-  winnerSide: 1 | 2;
-  completedGames: number;
-}
-
 export default function FinishTournamentResultScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const tournamentId = Array.isArray(id) ? id[0] : id;
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const user = useAuthStore((s) => s.user);
+  const profile = useAuthStore((s) => s.profile);
   const { showAlert } = useAlert();
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [registrations, setRegistrations] = useState<TournamentRegistrationDetails[]>([]);
   const [category, setCategory] = useState<TournamentCategory | null>(null);
+  const [guests, setGuests] = useState<Contestant[]>([]);
   const [player1Id, setPlayer1Id] = useState('');
   const [player2Id, setPlayer2Id] = useState('');
-  const [games, setGames] = useState<GameScore[]>([
-    { a: '', b: '' },
-    { a: '', b: '' },
-    { a: '', b: '' },
-  ]);
+  const [games, setGames] = useState<GameScore[]>(createEmptyGames);
   const [prizeMoney, setPrizeMoney] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
@@ -73,9 +57,13 @@ export default function FinishTournamentResultScreen() {
       const nextTournament = await fetchTournamentById(tournamentId);
       if (!nextTournament) throw new Error('Tournament not found.');
       const nextRegistrations = await fetchTournamentRegistrations(tournamentId);
+      const nextCategory = nextTournament.categories?.[0] ?? null;
       setTournament(nextTournament);
       setRegistrations(nextRegistrations);
-      setCategory(nextTournament.categories?.[0] ?? null);
+      setCategory(nextCategory);
+      const nextContestants = buildContestants(nextRegistrations, nextCategory?.id ?? null);
+      setPlayer1Id(nextContestants[0]?.id ?? '');
+      setPlayer2Id(nextContestants[1]?.id ?? '');
     } catch (err: any) {
       showAlert({
         type: 'danger',
@@ -91,17 +79,42 @@ export default function FinishTournamentResultScreen() {
     load();
   }, [load]);
 
-  const isOwner = !!user?.id && tournament?.organizer_id === user.id;
+  const resultAccess = getResultAccess(tournament, user?.id, profile?.role);
+  const canFinish = resultAccess.canManage;
   const categories = tournament?.categories ?? [];
-  const contestants = useMemo(
+  const registeredContestants = useMemo(
     () => buildContestants(registrations, category?.id ?? null),
     [category?.id, registrations]
   );
+  const contestants = useMemo(
+    () => [
+      ...registeredContestants,
+      ...guests.filter((guest) => !category?.id || guest.categoryId === category.id),
+    ],
+    [category?.id, guests, registeredContestants]
+  );
 
-  useEffect(() => {
-    setPlayer1Id(contestants[0]?.id ?? '');
-    setPlayer2Id(contestants[1]?.id ?? '');
-  }, [contestants]);
+  const handleSelectCategory = (next: TournamentCategory) => {
+    if (next.id === category?.id) return;
+    setCategory(next);
+    const nextContestants = buildContestants(registrations, next.id);
+    setPlayer1Id(nextContestants[0]?.id ?? '');
+    setPlayer2Id(nextContestants[1]?.id ?? '');
+  };
+
+  const handleAddGuest = (name: string) => {
+    const guest = createGuestContestant(name, category?.id ?? null);
+    setGuests((current) => [...current, guest]);
+    // Drop the new name straight into whichever side is still empty.
+    if (!player1Id) setPlayer1Id(guest.id);
+    else if (!player2Id) setPlayer2Id(guest.id);
+  };
+
+  const handleRemoveGuest = (guestId: string) => {
+    setGuests((current) => current.filter((guest) => guest.id !== guestId));
+    if (player1Id === guestId) setPlayer1Id('');
+    if (player2Id === guestId) setPlayer2Id('');
+  };
 
   const player1 = contestants.find((item) => item.id === player1Id) ?? null;
   const player2 = contestants.find((item) => item.id === player2Id) ?? null;
@@ -109,13 +122,11 @@ export default function FinishTournamentResultScreen() {
   const winner =
     scoreSummary?.winnerSide === 1 ? player1 : scoreSummary?.winnerSide === 2 ? player2 : null;
   const prize = prizeMoney.trim() ? Number(prizeMoney) : null;
-  const hasPartialGame = games.some(
-    (game) => (game.a.trim() && !game.b.trim()) || (!game.a.trim() && game.b.trim())
-  );
+  const hasPartialGame = hasIncompleteGame(games);
   const canSave =
     !!user?.id &&
     !!tournament &&
-    isOwner &&
+    canFinish &&
     !!category &&
     !!player1 &&
     !!player2 &&
@@ -202,7 +213,7 @@ export default function FinishTournamentResultScreen() {
     );
   }
 
-  if (!tournament || !isOwner) {
+  if (!tournament || !canFinish) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.header}>
@@ -217,10 +228,12 @@ export default function FinishTournamentResultScreen() {
         <View style={styles.empty}>
           <Ionicons name="lock-closed-outline" size={46} color={colors.textMuted} />
           <AppText variant="title" weight="semiBold" center>
-            Organizer access only
+            {resultAccess.lockedByCloseWindow ? 'Tournament closed' : 'Organizer access only'}
           </AppText>
           <AppText variant="body" color={colors.textSecondary} center>
-            Only the organizer who created this tournament can finish it and upload results.
+            {resultAccess.lockedByCloseWindow
+              ? 'This tournament closed a week after its last match day. Ask an admin to add or correct a result now.'
+              : 'Only the organizer who created this tournament, or an admin, can finish it and upload results.'}
           </AppText>
         </View>
       </SafeAreaView>
@@ -305,7 +318,7 @@ export default function FinishTournamentResultScreen() {
             return (
               <Pressable
                 key={item.id}
-                onPress={() => setCategory(item)}
+                onPress={() => handleSelectCategory(item)}
                 style={[styles.chip, selected ? styles.chipActive : null]}
               >
                 <AppText
@@ -325,30 +338,32 @@ export default function FinishTournamentResultScreen() {
           <View style={styles.infoBox}>
             <Ionicons name="people-outline" size={18} color={colors.primary} />
             <AppText variant="caption" color={colors.textSecondary} style={{ flex: 1 }}>
-              Approve at least two entries in this category before uploading the final result.
+              Fewer than two approved entries in this category. Add the missing players by name
+              below — they don&apos;t need a SmashDraw account.
             </AppText>
           </View>
-        ) : (
-          <View style={styles.contestantGrid}>
-            <ContestantPicker
-              colors={colors}
-              contestants={contestants}
-              label="Side A"
-              selectedId={player1Id}
-              setSelectedId={setPlayer1Id}
-              styles={styles}
-            />
-            <ContestantPicker
-              colors={colors}
-              contestants={contestants}
-              excludedId={player1Id}
-              label="Side B"
-              selectedId={player2Id}
-              setSelectedId={setPlayer2Id}
-              styles={styles}
-            />
-          </View>
-        )}
+        ) : null}
+        <View style={styles.contestantGrid}>
+          <ContestantPicker
+            contestants={contestants}
+            label="Side A"
+            onRemoveGuest={handleRemoveGuest}
+            onSelect={setPlayer1Id}
+            selectedId={player1Id}
+          />
+          <ContestantPicker
+            contestants={contestants}
+            excludedId={player1Id}
+            label="Side B"
+            onRemoveGuest={handleRemoveGuest}
+            onSelect={setPlayer2Id}
+            selectedId={player2Id}
+          />
+          <ManualContestantInput
+            isDoubles={isDoublesCategory(category?.name ?? '')}
+            onAdd={handleAddGuest}
+          />
+        </View>
 
         <SectionTitle title="Scorecard" />
         <View style={styles.scorecard}>
@@ -481,60 +496,6 @@ function ScorePill({
   );
 }
 
-function ContestantPicker({
-  colors,
-  contestants,
-  excludedId,
-  label,
-  selectedId,
-  setSelectedId,
-  styles,
-}: {
-  colors: ReturnType<typeof useTheme>['colors'];
-  contestants: Contestant[];
-  excludedId?: string;
-  label: string;
-  selectedId: string;
-  setSelectedId: (id: string) => void;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View style={styles.pickerBlock}>
-      <AppText variant="label" weight="medium" color={colors.textSecondary}>
-        {label}
-      </AppText>
-      <View style={styles.optionList}>
-        {contestants
-          .filter((item) => item.id !== excludedId)
-          .map((item) => {
-            const selected = selectedId === item.id;
-            return (
-              <Pressable
-                key={item.id}
-                onPress={() => setSelectedId(item.id)}
-                style={[styles.option, selected ? styles.optionActive : null]}
-              >
-                <View style={{ flex: 1 }}>
-                  <AppText variant="caption" weight="semiBold" numberOfLines={1}>
-                    {item.name}
-                  </AppText>
-                  {item.detail ? (
-                    <AppText variant="xs" color={colors.textMuted} numberOfLines={1}>
-                      {item.detail}
-                    </AppText>
-                  ) : null}
-                </View>
-                {selected ? (
-                  <Ionicons name="checkmark-circle" size={17} color={colors.primary} />
-                ) : null}
-              </Pressable>
-            );
-          })}
-      </View>
-    </View>
-  );
-}
-
 function ScoreRow({
   colors,
   games,
@@ -577,74 +538,6 @@ function ScoreRow({
       </View>
     </View>
   );
-}
-
-function summarizeScore(games: GameScore[]): ScoreSummary | null {
-  const completed = games
-    .map((game) => ({ a: Number(game.a), b: Number(game.b), raw: game }))
-    .filter(({ raw }) => raw.a.trim() && raw.b.trim())
-    .filter(({ a, b }) => Number.isFinite(a) && Number.isFinite(b) && a >= 0 && b >= 0);
-
-  if (completed.length === 0) return null;
-
-  let player1Games = 0;
-  let player2Games = 0;
-  let player1Points = 0;
-  let player2Points = 0;
-
-  for (const game of completed) {
-    if (game.a === game.b) return null;
-    if (game.a > game.b) player1Games += 1;
-    else player2Games += 1;
-    player1Points += game.a;
-    player2Points += game.b;
-  }
-
-  if (player1Games === player2Games) return null;
-
-  return {
-    player1Games,
-    player2Games,
-    player1Points,
-    player2Points,
-    scoreText: completed.map((game) => `${game.a}-${game.b}`).join(', '),
-    winnerSide: player1Games > player2Games ? 1 : 2,
-    completedGames: completed.length,
-  };
-}
-
-function buildContestants(
-  registrations: TournamentRegistrationDetails[],
-  categoryId: string | null
-): Contestant[] {
-  return registrations
-    .filter((registration) => registration.status === 'approved')
-    .filter((registration) => !categoryId || registration.category_id === categoryId)
-    .map((registration) => {
-      const notes = parseRegistrationNotes(registration.notes);
-      const playerName = notes.playerName ?? registration.player?.name ?? 'Player';
-      const partnerName = notes.partnerName;
-      const isDoubles = isDoublesCategory(registration.category?.name ?? '');
-      return {
-        id: registration.id,
-        userId: registration.user_id,
-        categoryId: registration.category_id,
-        name: isDoubles && partnerName ? `${playerName} / ${partnerName}` : playerName,
-        detail: registration.player?.city ?? '',
-      };
-    });
-}
-
-function parseRegistrationNotes(notes: string | null) {
-  if (!notes) return {};
-  try {
-    return JSON.parse(notes) as {
-      playerName?: string;
-      partnerName?: string | null;
-    };
-  } catch {
-    return {};
-  }
 }
 
 function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
@@ -754,28 +647,6 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     contestantGrid: {
       gap: 12,
-    },
-    pickerBlock: {
-      gap: 8,
-    },
-    optionList: {
-      gap: 7,
-    },
-    option: {
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderColor: colors.border,
-      borderRadius: 12,
-      borderWidth: 1,
-      flexDirection: 'row',
-      gap: 10,
-      minHeight: 52,
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-    },
-    optionActive: {
-      backgroundColor: colors.primaryLight,
-      borderColor: colors.primary,
     },
     scorecard: {
       backgroundColor: colors.card,

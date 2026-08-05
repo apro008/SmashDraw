@@ -13,6 +13,7 @@ import { useAuthStore } from '~/store/useAuthStore';
 import { supabase } from '~/lib/supabase';
 import { useAlert } from '~/providers/AlertProvider';
 import { extractCoordinatesFromMapText, isValidCoordinates, openLocationSearch } from '~/lib/maps';
+import { startOfToday, toDateOnlyString } from '~/lib/tournaments';
 import {
   createEditableCategoryPresets,
   getAutoPrizeDistribution,
@@ -42,6 +43,7 @@ export default function CreateTournamentScreen() {
   const [paymentAddress, setPaymentAddress] = useState('');
   const [publishStatus, setPublishStatus] = useState<'draft' | 'open'>('draft');
   const [categories, setCategories] = useState(createEditableCategoryPresets);
+  const [customCategoryName, setCustomCategoryName] = useState('');
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [mapPickerVisible, setMapPickerVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,6 +68,46 @@ export default function CreateTournamentScreen() {
         return { ...category, enabled: !category.enabled };
       });
     });
+  };
+
+  const addCustomCategory = () => {
+    const name = normalizeCategoryName(customCategoryName);
+    if (!name) {
+      showAlert({
+        type: 'warning',
+        title: 'Category name required',
+        message: 'Please enter a category name.',
+      });
+      return;
+    }
+
+    if (
+      categories.some(
+        (category) => normalizeCategoryName(category.name).toLowerCase() === name.toLowerCase()
+      )
+    ) {
+      showAlert({
+        type: 'warning',
+        title: 'Category already exists',
+        message: 'Use a different category name.',
+      });
+      return;
+    }
+
+    setCategories((current) => [
+      ...current,
+      updatePrizeForCategory({
+        id: `custom-${Date.now()}`,
+        name,
+        entry_fee: 0,
+        max_players: 32,
+        skill_level: 'open',
+        prize: null,
+        enabled: true,
+        is_custom: true,
+      }),
+    ]);
+    setCustomCategoryName('');
   };
 
   const handleLocationPicked = (location: PickedLocation) => {
@@ -104,13 +146,14 @@ export default function CreateTournamentScreen() {
     setPaymentAddress('');
     setPublishStatus('draft');
     setCategories(createEditableCategoryPresets());
+    setCustomCategoryName('');
   };
 
   const handleCreate = async () => {
     const cleanPhones = contactPhones.map((phone) => phone.trim()).filter(Boolean);
     const latitude = parseOptionalCoordinate(venueLatitude);
     const longitude = parseOptionalCoordinate(venueLongitude);
-    const tomorrow = getTomorrowStart();
+    const today = startOfToday();
 
     if (
       !title.trim() ||
@@ -132,11 +175,32 @@ export default function CreateTournamentScreen() {
     }
     if (!user || !profile) return;
 
-    if (startDate < tomorrow) {
+    const invalidCategory = enabledCategories.find(
+      (category) => !normalizeCategoryName(category.name)
+    );
+    if (invalidCategory) {
+      showAlert({
+        type: 'warning',
+        title: 'Category name required',
+        message: 'Please name every selected category.',
+      });
+      return;
+    }
+
+    if (hasDuplicateCategoryNames(enabledCategories)) {
+      showAlert({
+        type: 'warning',
+        title: 'Duplicate category',
+        message: 'Selected categories must have unique names.',
+      });
+      return;
+    }
+
+    if (startDate < today) {
       showAlert({
         type: 'warning',
         title: 'Invalid start date',
-        message: 'Start date must be tomorrow or later.',
+        message: 'Start date must be today or later.',
       });
       return;
     }
@@ -194,8 +258,9 @@ export default function CreateTournamentScreen() {
       if (error) throw error;
 
       const { error: categoriesError } = await supabase.from('tournament_categories').insert(
-        enabledCategories.map(({ enabled, prizeEdited, ...category }) => ({
+        enabledCategories.map(({ enabled, id, is_custom, prizeEdited, ...category }) => ({
           ...category,
+          name: normalizeCategoryName(category.name),
           entry_fee: Number(category.entry_fee) || 0,
           max_players: Number(category.max_players) || 0,
           prize: category.prize?.trim() || null,
@@ -380,7 +445,7 @@ export default function CreateTournamentScreen() {
                 setStartDate(date);
                 if (!endDate || endDate < date) setEndDate(date);
               }}
-              minimumDate={getTomorrowStart()}
+              minimumDate={startOfToday()}
               mode="date"
             />
           </View>
@@ -444,10 +509,10 @@ export default function CreateTournamentScreen() {
 
           <View style={styles.selectedChips}>
             {enabledCategories.map((category) => {
-              const categoryIndex = categories.findIndex((item) => item.name === category.name);
+              const categoryIndex = categories.findIndex((item) => item.id === category.id);
               return (
                 <TouchableOpacity
-                  key={category.name}
+                  key={category.id}
                   activeOpacity={0.8}
                   disabled={enabledCategories.length === 1}
                   onPress={() => toggleCategory(categoryIndex)}
@@ -471,7 +536,7 @@ export default function CreateTournamentScreen() {
                 const isLastSelected = category.enabled && enabledCategories.length === 1;
                 return (
                   <TouchableOpacity
-                    key={category.name}
+                    key={category.id}
                     activeOpacity={0.85}
                     disabled={isLastSelected}
                     style={[styles.categoryOption, category.enabled && styles.categoryOptionActive]}
@@ -505,6 +570,34 @@ export default function CreateTournamentScreen() {
                   </TouchableOpacity>
                 );
               })}
+
+              <View style={styles.customCategoryBox}>
+                <AppText variant="label" weight="semiBold">
+                  Custom Category
+                </AppText>
+                <View style={styles.customCategoryRow}>
+                  <TextInput
+                    style={[styles.input, styles.customCategoryInput]}
+                    value={customCategoryName}
+                    onChangeText={setCustomCategoryName}
+                    placeholder="e.g. Under-17 Singles"
+                    placeholderTextColor={colors.textMuted}
+                    returnKeyType="done"
+                    onSubmitEditing={addCustomCategory}
+                  />
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    style={[
+                      styles.addCustomCategoryButton,
+                      !customCategoryName.trim() && styles.addCustomCategoryButtonDisabled,
+                    ]}
+                    disabled={!customCategoryName.trim()}
+                    onPress={addCustomCategory}
+                  >
+                    <Ionicons name="add" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           ) : null}
         </View>
@@ -512,7 +605,7 @@ export default function CreateTournamentScreen() {
         <View style={styles.categoryList}>
           {categories.map((category, index) =>
             category.enabled ? (
-              <View key={category.name} style={styles.categoryCard}>
+              <View key={category.id} style={styles.categoryCard}>
                 <View style={styles.categoryHeader}>
                   <View style={styles.categoryBadge}>
                     <Ionicons
@@ -539,6 +632,27 @@ export default function CreateTournamentScreen() {
                     </TouchableOpacity>
                   ) : null}
                 </View>
+
+                {category.is_custom ? (
+                  <View style={styles.field}>
+                    <AppText
+                      variant="label"
+                      weight="medium"
+                      color={colors.textSecondary}
+                      style={styles.label}
+                    >
+                      Category Name *
+                    </AppText>
+                    <TextInput
+                      style={styles.input}
+                      value={category.name}
+                      onChangeText={(value) => updateCategory(index, { name: value })}
+                      placeholder="e.g. Under-17 Singles"
+                      placeholderTextColor={colors.textMuted}
+                      returnKeyType="next"
+                    />
+                  </View>
+                ) : null}
 
                 <View style={styles.row}>
                   <View style={[styles.field, { flex: 1 }]}>
@@ -1015,21 +1129,25 @@ function updatePrizeForCategory<
   };
 }
 
+function normalizeCategoryName(name: string) {
+  return name.trim().replace(/\s+/g, ' ');
+}
+
+function hasDuplicateCategoryNames(categories: { name: string }[]) {
+  const seen = new Set<string>();
+  return categories.some((category) => {
+    const normalized = normalizeCategoryName(category.name).toLowerCase();
+    if (!normalized) return false;
+    if (seen.has(normalized)) return true;
+    seen.add(normalized);
+    return false;
+  });
+}
+
 function toDateString(date: Date) {
-  return date.toISOString().slice(0, 10);
+  // Local calendar date — `toISOString()` would shift IST evenings back a day.
+  return toDateOnlyString(date);
 }
-
-function getTomorrowStart() {
-  const tomorrow = new Date();
-  tomorrow.setHours(0, 0, 0, 0);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return tomorrow;
-}
-
-const DEFAULT_MAP_COORDINATE: MapCoordinate = {
-  latitude: 20.5937,
-  longitude: 78.9629,
-};
 
 function getSelectedCoordinate(latitudeText: string, longitudeText: string) {
   const latitude = parseOptionalCoordinate(latitudeText);
@@ -1217,6 +1335,33 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     categoryOptionIconActive: {
       backgroundColor: colors.primary,
+    },
+    customCategoryBox: {
+      backgroundColor: colors.background,
+      borderColor: colors.border,
+      borderRadius: 12,
+      borderWidth: 1,
+      gap: 8,
+      padding: 10,
+    },
+    customCategoryRow: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 8,
+    },
+    customCategoryInput: {
+      flex: 1,
+    },
+    addCustomCategoryButton: {
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      height: 48,
+      justifyContent: 'center',
+      width: 48,
+    },
+    addCustomCategoryButtonDisabled: {
+      opacity: 0.45,
     },
     categorySummary: {
       alignItems: 'center',

@@ -12,10 +12,15 @@ import { Tournament, TournamentCategory, TournamentMatchResult, TournamentStatus
 import { addCalendarEvent } from '~/lib/calendar';
 import { useAlert } from '~/providers/AlertProvider';
 import {
+  closeTournamentIfDue,
   fetchTournamentById,
   fetchTournamentResults,
   fetchTournamentRegistrations,
   fetchUserTournamentRegistrations,
+  getDaysUntilClose,
+  getEffectiveTournamentStatus,
+  getResultAccess,
+  isTournamentClosed,
   TournamentRegistrationDetails,
   updateRegistrationStatus,
   updateTournamentStatus,
@@ -82,6 +87,14 @@ function formatDate(dateStr: string) {
 
 function formatShortDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+/** Winner ids are authoritative; older rows may only carry the winner name. */
+function didSideWin(result: TournamentMatchResult, side: 1 | 2) {
+  const playerId = side === 1 ? result.player1_id : result.player2_id;
+  const playerName = side === 1 ? result.player1_name : result.player2_name;
+  if (result.winner_id && playerId) return result.winner_id === playerId;
+  return !!result.winner_name && result.winner_name === playerName;
 }
 
 function getCategoryColor(name: string) {
@@ -320,22 +333,24 @@ function CategoryRow({
 // ─── Result card (match rows layout) ─────────────────────────────────────────
 function ResultCard({
   colors,
+  isMine,
   result,
   styles,
 }: {
   colors: any;
+  isMine?: boolean;
   result: TournamentMatchResult;
   styles: any;
 }) {
   const p1Score = result.player1_score ?? 0;
   const p2Score = result.player2_score ?? 0;
-  const p1Won = !!result.winner_name && result.winner_name === result.player1_name;
-  const p2Won = !!result.winner_name && result.winner_name === result.player2_name;
+  const p1Won = didSideWin(result, 1);
+  const p2Won = didSideWin(result, 2);
   const catColor = getCategoryColor(result.category?.name ?? '');
   const abbr = result.category?.name ? getCategoryAbbr(result.category.name) : '?';
 
   return (
-    <View style={styles.resultCard}>
+    <View style={[styles.resultCard, isMine ? styles.resultCardMine : null]}>
       <View style={[styles.resultAccentStrip, { backgroundColor: catColor }]} />
       <View style={styles.resultInner}>
         {/* Header */}
@@ -353,6 +368,13 @@ function ResultCard({
           <AppText variant="xs" color={colors.textMuted} style={{ flex: 1 }} numberOfLines={1}>
             {result.category?.name ?? 'Match'} · #{result.match_number}
           </AppText>
+          {isMine ? (
+            <View style={[styles.resultMineChip, { borderColor: colors.primary }]}>
+              <AppText variant="xs" weight="semiBold" color={colors.primary}>
+                Your match
+              </AppText>
+            </View>
+          ) : null}
           {result.completed_at ? (
             <AppText variant="xs" color={colors.textMuted}>
               {formatShortDate(result.completed_at)}
@@ -728,10 +750,19 @@ export default function TournamentDetailScreen() {
     if (!id) return;
     setLoading(true);
     try {
-      const next = await fetchTournamentById(id);
+      let next = await fetchTournamentById(id);
+      const canViewReg = !!next && (next.organizer_id === user?.id || profile?.role === 'admin');
+      // A tournament reads as finished a week after its last match day. Organizers and admins
+      // are the only roles allowed to write the status, so they persist it on view.
+      if (next && canViewReg) {
+        try {
+          if (await closeTournamentIfDue(next)) next = { ...next, status: 'completed' };
+        } catch {
+          // Non-fatal: the screen still renders the closed state from the end date.
+        }
+      }
       setTournament(next);
       setResults(next ? await fetchTournamentResults(id) : []);
-      const canViewReg = !!next && (next.organizer_id === user?.id || profile?.role === 'admin');
       setRegistrations(canViewReg ? await fetchTournamentRegistrations(id) : []);
       const loadMyEntries = !!next && !!user?.id && next.organizer_id !== user.id;
       setMyRegistrations(loadMyEntries ? await fetchUserTournamentRegistrations(id, user.id) : []);
@@ -753,11 +784,11 @@ export default function TournamentDetailScreen() {
   );
 
   useEffect(() => {
-    if (handledFinishParam || finishMatch !== '1' || profile?.role !== 'admin' || !tournament)
-      return;
+    if (handledFinishParam || finishMatch !== '1' || !tournament) return;
+    if (!getResultAccess(tournament, user?.id, profile?.role).canManage) return;
     setResultEntryVisible(true);
     setHandledFinishParam(true);
-  }, [finishMatch, handledFinishParam, profile?.role, tournament]);
+  }, [finishMatch, handledFinishParam, profile?.role, tournament, user?.id]);
 
   if (loading) {
     return (
@@ -798,7 +829,10 @@ export default function TournamentDetailScreen() {
     );
   }
 
-  const statusCfg = STATUS_CONFIG[tournament.status];
+  const effectiveStatus = getEffectiveTournamentStatus(tournament);
+  const isClosed = isTournamentClosed(tournament);
+  const daysUntilClose = getDaysUntilClose(tournament);
+  const statusCfg = STATUS_CONFIG[effectiveStatus];
   const accentColor = hashColor(tournament.id);
   const dateRange =
     tournament.start_date === tournament.end_date
@@ -815,12 +849,16 @@ export default function TournamentDetailScreen() {
   const canJoinAnotherCategory = registeredCategoryIds.length < openCategoryCount;
   const canRegister =
     profile?.role === 'player' &&
-    tournament.status === 'open' &&
+    effectiveStatus === 'open' &&
     tournament.organizer_id !== user?.id &&
     openCategoryCount > 0 &&
     canJoinAnotherCategory;
   const canViewRegistrations = tournament.organizer_id === user?.id || profile?.role === 'admin';
-  const canManageResults = profile?.role === 'admin';
+  const resultAccess = getResultAccess(tournament, user?.id, profile?.role);
+  const canManageResults = resultAccess.canManage;
+  const myResults = user?.id
+    ? results.filter((r) => r.player1_id === user.id || r.player2_id === user.id)
+    : [];
 
   const approvedCount = registrations.filter((r) => r.status === 'approved').length;
   const pendingCount = registrations.filter((r) => r.status === 'pending').length;
@@ -1040,7 +1078,7 @@ export default function TournamentDetailScreen() {
         </ScrollView>
 
         {/* ── Results ── */}
-        {results.length > 0 ? (
+        {results.length > 0 || effectiveStatus === 'completed' ? (
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
               <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
@@ -1050,75 +1088,122 @@ export default function TournamentDetailScreen() {
                 </AppText>
                 <AppText variant="xs" color={colors.textMuted}>
                   {results.length} completed match{results.length === 1 ? '' : 'es'}
+                  {myResults.length > 0 ? ` · you played ${myResults.length}` : ''}
                 </AppText>
               </View>
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={handleOpenDetailedResult}
-                style={[
-                  styles.sectionLinkBtn,
-                  { borderColor: accentColor + '50', backgroundColor: accentColor + '12' },
-                ]}
-              >
-                <Ionicons name="stats-chart-outline" size={13} color={accentColor} />
-                <AppText variant="xs" weight="semiBold" color={accentColor}>
-                  See all
+              {results.length > 0 ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={handleOpenDetailedResult}
+                  style={[
+                    styles.sectionLinkBtn,
+                    { borderColor: accentColor + '50', backgroundColor: accentColor + '12' },
+                  ]}
+                >
+                  <Ionicons name="stats-chart-outline" size={13} color={accentColor} />
+                  <AppText variant="xs" weight="semiBold" color={accentColor}>
+                    See all
+                  </AppText>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {results.length === 0 ? (
+              <View style={styles.card}>
+                <AppText variant="body" color={colors.textSecondary}>
+                  This tournament has ended and no scorecard has been published yet.
                 </AppText>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.resultList}>
-              {results.slice(0, 2).map((r) => (
-                <ResultCard key={r.id} result={r} colors={colors} styles={styles} />
-              ))}
-            </View>
+              </View>
+            ) : (
+              <View style={styles.resultList}>
+                {/* Own matches first so a player sees their own scoreline immediately */}
+                {[...myResults, ...results.filter((r) => !myResults.includes(r))]
+                  .slice(0, 2)
+                  .map((r) => (
+                    <ResultCard
+                      key={r.id}
+                      result={r}
+                      colors={colors}
+                      isMine={myResults.includes(r)}
+                      styles={styles}
+                    />
+                  ))}
+              </View>
+            )}
           </View>
         ) : null}
 
-        {/* ── Admin tools ── */}
+        {/* ── Result management (organizer + admin) ── */}
         {canManageResults ? (
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
               <View style={[styles.sectionAccentDot, { backgroundColor: '#DC2626' }]} />
-              <AppText variant="title" weight="semiBold">
-                Admin Tools
-              </AppText>
+              <View style={{ flex: 1 }}>
+                <AppText variant="title" weight="semiBold">
+                  {resultAccess.isAdmin ? 'Admin Tools' : 'Organizer Tools'}
+                </AppText>
+                <AppText variant="xs" color={colors.textMuted}>
+                  {isClosed
+                    ? 'Closed a week after the last match day — admin edits still allowed.'
+                    : `Results editable for ${daysUntilClose} more day${daysUntilClose === 1 ? '' : 's'}.`}
+                </AppText>
+              </View>
             </View>
             <View style={styles.adminActions}>
-              <TouchableOpacity
-                activeOpacity={0.85}
-                disabled={statusUpdating}
-                onPress={() =>
-                  handleTournamentStatusChange(tournament.status === 'paused' ? 'open' : 'paused')
-                }
-                style={[
-                  styles.adminAction,
-                  tournament.status !== 'paused' ? styles.pauseAction : styles.resumeAction,
-                ]}
-              >
-                <Ionicons
-                  name={tournament.status === 'paused' ? 'play-outline' : 'pause-outline'}
-                  size={16}
-                  color={tournament.status === 'paused' ? colors.primary : '#DC2626'}
-                />
-                <AppText
-                  variant="label"
-                  weight="semiBold"
-                  color={tournament.status === 'paused' ? colors.primary : '#DC2626'}
+              {resultAccess.isAdmin ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  disabled={statusUpdating}
+                  onPress={() =>
+                    handleTournamentStatusChange(tournament.status === 'paused' ? 'open' : 'paused')
+                  }
+                  style={[
+                    styles.adminAction,
+                    tournament.status !== 'paused' ? styles.pauseAction : styles.resumeAction,
+                  ]}
                 >
-                  {tournament.status === 'paused' ? 'Resume' : 'Pause'}
-                </AppText>
-              </TouchableOpacity>
+                  <Ionicons
+                    name={tournament.status === 'paused' ? 'play-outline' : 'pause-outline'}
+                    size={16}
+                    color={tournament.status === 'paused' ? colors.primary : '#DC2626'}
+                  />
+                  <AppText
+                    variant="label"
+                    weight="semiBold"
+                    color={tournament.status === 'paused' ? colors.primary : '#DC2626'}
+                  >
+                    {tournament.status === 'paused' ? 'Resume' : 'Pause'}
+                  </AppText>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => setResultEntryVisible(true)}
                 style={[styles.adminAction, styles.finishAction]}
               >
-                <Ionicons name="flag-outline" size={16} color="#fff" />
+                <Ionicons name="add-circle-outline" size={16} color="#fff" />
                 <AppText variant="label" weight="semiBold" color="#fff">
-                  Finish Match
+                  Add Match Result
                 </AppText>
               </TouchableOpacity>
             </View>
+            {results.length > 0 ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleOpenDetailedResult}
+                style={styles.manageResultsLink}
+              >
+                <Ionicons name="create-outline" size={15} color={colors.primary} />
+                <AppText
+                  variant="label"
+                  weight="semiBold"
+                  color={colors.primary}
+                  style={{ flex: 1 }}
+                >
+                  Update an uploaded result
+                </AppText>
+                <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
 
@@ -1288,7 +1373,7 @@ export default function TournamentDetailScreen() {
                 (() => {
                   const grouped = groupRegistrationsByCategory(registrations);
                   const canChange =
-                    tournament.status !== 'completed' && tournament.status !== 'cancelled'
+                    effectiveStatus !== 'completed' && effectiveStatus !== 'cancelled'
                       ? handleRegistrationStatusChange
                       : undefined;
                   if (grouped.length <= 1) {
@@ -1443,13 +1528,15 @@ export default function TournamentDetailScreen() {
         onRegistered={loadTournament}
         registeredCategoryIds={registeredCategoryIds}
       />
-      <ResultEntrySheet
-        tournament={tournament}
-        registrations={registrations}
-        visible={resultEntryVisible}
-        onClose={() => setResultEntryVisible(false)}
-        onSaved={loadTournament}
-      />
+      {canManageResults ? (
+        <ResultEntrySheet
+          tournament={tournament}
+          registrations={registrations}
+          visible={resultEntryVisible}
+          onClose={() => setResultEntryVisible(false)}
+          onSaved={loadTournament}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1670,10 +1757,12 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderColor: colors.border,
       overflow: 'hidden',
     },
+    resultCardMine: { borderColor: colors.primary, borderWidth: 1.5 },
     resultAccentStrip: { width: 4, alignSelf: 'stretch' },
     resultInner: { flex: 1, padding: 14, gap: 10 },
     resultHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     resultCatChip: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+    resultMineChip: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20, borderWidth: 1 },
     matchRows: {
       borderRadius: 10,
       overflow: 'hidden',
@@ -1749,6 +1838,18 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     pauseAction: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
     resumeAction: { backgroundColor: colors.primaryLight, borderColor: colors.primary + '50' },
     finishAction: { backgroundColor: colors.primary, borderColor: colors.primary },
+    manageResultsLink: {
+      alignItems: 'center',
+      backgroundColor: colors.primaryLight,
+      borderColor: colors.primary + '50',
+      borderRadius: 12,
+      borderWidth: 1,
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 10,
+      minHeight: 46,
+      paddingHorizontal: 14,
+    },
 
     // Registrations
     registrationsList: { gap: 12 },

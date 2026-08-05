@@ -9,7 +9,7 @@ import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { TournamentCard } from '~/components/TournamentCard';
 import { useTheme } from '~/hooks/useTheme';
 import { Tournament, TournamentStatus } from '~/types';
-import { fetchDiscoverableTournaments } from '~/lib/tournaments';
+import { fetchDiscoverableTournaments, getEffectiveTournamentStatus } from '~/lib/tournaments';
 import { useAlert } from '~/providers/AlertProvider';
 
 const STATUSES: { label: string; value: TournamentStatus | 'all'; color?: string }[] = [
@@ -69,7 +69,7 @@ export default function ExploreScreen() {
         t.title.toLowerCase().includes(query.toLowerCase()) ||
         t.city.toLowerCase().includes(query.toLowerCase());
       const matchesCity = city === 'All' || t.city === city;
-      const matchesStatus = status === 'all' || t.status === status;
+      const matchesStatus = status === 'all' || getEffectiveTournamentStatus(t) === status;
       return matchesQuery && matchesCity && matchesStatus;
     });
   }, [city, query, status, tournaments]);

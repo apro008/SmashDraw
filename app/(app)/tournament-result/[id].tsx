@@ -7,10 +7,14 @@ import { AppText } from '~/components/AppText';
 import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { ResultEntrySheet } from '~/components/tournament/ResultEntrySheet';
 import { useTheme } from '~/hooks/useTheme';
+import { parseGames } from '~/lib/matchScore';
 import {
   fetchTournamentById,
   fetchTournamentRegistrations,
   fetchTournamentResults,
+  getDaysUntilClose,
+  getResultAccess,
+  isTournamentClosed,
   TournamentRegistrationDetails,
 } from '~/lib/tournaments';
 import { useAlert } from '~/providers/AlertProvider';
@@ -25,17 +29,57 @@ function formatDate(dateStr: string) {
   });
 }
 
-function parseGames(score: string | null) {
-  if (!score) return [];
-  return score
-    .split(',')
-    .map((game) => game.trim())
-    .map((game) => {
-      const [a, b] = game.split('-').map((part) => Number(part.trim()));
-      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-      return { a, b };
-    })
-    .filter((game): game is { a: number; b: number } => !!game);
+/** Did this match involve the signed-in account? Matches store the registering user's id. */
+function isMyMatch(result: TournamentMatchResult, userId?: string | null) {
+  if (!userId) return false;
+  return result.player1_id === userId || result.player2_id === userId;
+}
+
+function didIWin(result: TournamentMatchResult, userId?: string | null) {
+  if (!userId) return false;
+  if (result.winner_id) return result.winner_id === userId;
+  // Older rows may only carry the winner name — fall back to matching the side.
+  if (result.player1_id === userId) return result.winner_name === result.player1_name;
+  if (result.player2_id === userId) return result.winner_name === result.player2_name;
+  return false;
+}
+
+function wonSide(result: TournamentMatchResult, side: 1 | 2) {
+  const playerId = side === 1 ? result.player1_id : result.player2_id;
+  const playerName = side === 1 ? result.player1_name : result.player2_name;
+  if (result.winner_id && playerId) return result.winner_id === playerId;
+  return !!result.winner_name && result.winner_name === playerName;
+}
+
+interface CategoryGroup {
+  categoryId: string;
+  categoryName: string;
+  matches: TournamentMatchResult[];
+  champion: string | null;
+}
+
+/** Groups completed matches per category; the latest match in a category decides its champion. */
+function groupByCategory(results: TournamentMatchResult[]): CategoryGroup[] {
+  const groups = new Map<string, CategoryGroup>();
+  for (const result of results) {
+    const categoryId = result.category_id;
+    const existing = groups.get(categoryId);
+    if (existing) {
+      existing.matches.push(result);
+      continue;
+    }
+    groups.set(categoryId, {
+      categoryId,
+      categoryName: result.category?.name ?? 'Match Results',
+      matches: [result],
+      champion: null,
+    });
+  }
+
+  return [...groups.values()].map((group) => {
+    const decider = [...group.matches].sort((a, b) => b.match_number - a.match_number)[0];
+    return { ...group, champion: decider?.winner_name ?? null };
+  });
 }
 
 export default function TournamentResultScreen() {
@@ -45,6 +89,7 @@ export default function TournamentResultScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { showAlert } = useAlert();
   const user = useAuthStore((s) => s.user);
+  const profile = useAuthStore((s) => s.profile);
   const entrance = useRef(new Animated.Value(0)).current;
 
   const [loading, setLoading] = useState(true);
@@ -64,11 +109,9 @@ export default function TournamentResultScreen() {
       ]);
       setTournament(nextTournament);
       setResults(nextResults);
-      if (nextTournament && user?.id === nextTournament.organizer_id) {
-        setRegistrations(await fetchTournamentRegistrations(tournamentId));
-      } else {
-        setRegistrations([]);
-      }
+      const access = getResultAccess(nextTournament, user?.id, profile?.role);
+      // Contestant pickers need the entry list, so load it for organizers and admins alike.
+      setRegistrations(access.canManage ? await fetchTournamentRegistrations(tournamentId) : []);
     } catch (err: any) {
       showAlert({
         type: 'danger',
@@ -78,7 +121,7 @@ export default function TournamentResultScreen() {
     } finally {
       setLoading(false);
     }
-  }, [showAlert, tournamentId, user?.id]);
+  }, [profile?.role, showAlert, tournamentId, user?.id]);
 
   useEffect(() => {
     load();
@@ -94,11 +137,19 @@ export default function TournamentResultScreen() {
     }).start();
   }, [entrance, loading]);
 
-  const champion = results[0]?.winner_name ?? null;
+  const groups = useMemo(() => groupByCategory(results), [results]);
+  const myMatches = useMemo(
+    () => results.filter((result) => isMyMatch(result, user?.id)),
+    [results, user?.id]
+  );
+  const myWins = myMatches.filter((result) => didIWin(result, user?.id)).length;
   const totalPrize = results.reduce((sum, result) => sum + (result.prize_money_received ?? 0), 0);
-  const categoryCount = new Set(results.map((result) => result.category_id)).size;
   const slideUp = entrance.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
-  const canUpdateResults = !!tournament && !!user?.id && user.id === tournament.organizer_id;
+
+  const access = getResultAccess(tournament, user?.id, profile?.role);
+  const canManageResults = access.canManage;
+  const closed = !!tournament && isTournamentClosed(tournament);
+  const daysUntilClose = tournament ? getDaysUntilClose(tournament) : 0;
 
   const openUpdateSheet = (result: TournamentMatchResult | null) => {
     setEditingResult(result);
@@ -179,27 +230,143 @@ export default function TournamentResultScreen() {
                 <Ionicons name="trophy" size={30} color="#FDE68A" />
               </View>
               <View style={styles.heroBadge}>
-                <Ionicons name="stats-chart-outline" size={15} color="#fff" />
+                <Ionicons
+                  name={closed ? 'lock-closed-outline' : 'stats-chart-outline'}
+                  size={15}
+                  color="#fff"
+                />
                 <AppText variant="caption" weight="semiBold" color="#fff">
-                  Final Results
+                  {closed ? 'Closed' : results.length > 0 ? 'Live Results' : 'Results'}
                 </AppText>
               </View>
             </View>
             <AppText variant="heading" weight="bold" color="#fff" style={styles.heroTitle}>
-              {champion ?? 'Results pending'}
+              {results.length > 0
+                ? `${results.length} match${results.length === 1 ? '' : 'es'} played`
+                : 'Results pending'}
             </AppText>
             <AppText variant="body" color="rgba(255,255,255,0.72)" style={styles.heroSub}>
-              {champion
-                ? 'Top result from the latest completed match.'
+              {results.length > 0
+                ? closed
+                  ? 'Final standings for this tournament.'
+                  : 'Scorecards are published as matches finish.'
                 : 'The organizer has not uploaded a completed match yet.'}
             </AppText>
             <View style={styles.heroStats}>
               <HeroStat label="Matches" value={String(results.length)} />
-              <HeroStat label="Categories" value={String(categoryCount)} />
+              <HeroStat label="Categories" value={String(groups.length)} />
               <HeroStat label="Prize" value={totalPrize > 0 ? `Rs ${totalPrize}` : '--'} />
             </View>
           </View>
         </Animated.View>
+
+        {/* Viewer's own record — only meaningful for a player who competed */}
+        {myMatches.length > 0 ? (
+          <View style={styles.myCard}>
+            <View style={styles.myHeader}>
+              <View style={styles.myIcon}>
+                <Ionicons name="person" size={16} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText variant="bodyLg" weight="semiBold">
+                  Your Matches
+                </AppText>
+                <AppText variant="xs" color={colors.textMuted}>
+                  How you finished in this tournament
+                </AppText>
+              </View>
+            </View>
+            <View style={styles.myStatsRow}>
+              <MyStat colors={colors} label="Played" value={String(myMatches.length)} />
+              <MyStat colors={colors} color={colors.win} label="Won" value={String(myWins)} />
+              <MyStat
+                colors={colors}
+                color={colors.loss}
+                label="Lost"
+                value={String(myMatches.length - myWins)}
+              />
+            </View>
+            <View style={styles.myList}>
+              {myMatches.map((result) => {
+                const won = didIWin(result, user?.id);
+                const opponent =
+                  result.player1_id === user?.id ? result.player2_name : result.player1_name;
+                return (
+                  <View key={`mine-${result.id}`} style={styles.myRow}>
+                    <View
+                      style={[
+                        styles.myOutcome,
+                        { backgroundColor: won ? colors.win + '1A' : colors.loss + '1A' },
+                      ]}
+                    >
+                      <AppText variant="xs" weight="bold" color={won ? colors.win : colors.loss}>
+                        {won ? 'W' : 'L'}
+                      </AppText>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <AppText variant="caption" weight="semiBold" numberOfLines={1}>
+                        vs {opponent ?? 'Opponent'}
+                      </AppText>
+                      <AppText variant="xs" color={colors.textMuted} numberOfLines={1}>
+                        {result.category?.name ?? 'Match'} · #{result.match_number}
+                      </AppText>
+                    </View>
+                    <AppText variant="caption" weight="semiBold" color={colors.textSecondary}>
+                      {result.score ?? '--'}
+                    </AppText>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Category champions */}
+        {groups.length > 0 ? (
+          <View style={styles.championCard}>
+            <AppText variant="label" weight="semiBold" color={colors.textMuted}>
+              {closed ? 'CHAMPIONS' : 'LEADING SO FAR'}
+            </AppText>
+            <View style={styles.championList}>
+              {groups.map((group) => (
+                <View key={`champ-${group.categoryId}`} style={styles.championRow}>
+                  <Ionicons name="trophy" size={15} color="#B45309" />
+                  <AppText variant="caption" color={colors.textSecondary} style={{ flex: 1 }}>
+                    {group.categoryName}
+                  </AppText>
+                  <AppText variant="caption" weight="semiBold" numberOfLines={1}>
+                    {group.champion ?? 'TBD'}
+                  </AppText>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {canManageResults ? (
+          <View style={styles.managerBar}>
+            <View style={{ flex: 1 }}>
+              <AppText variant="caption" weight="semiBold">
+                {access.isAdmin && closed ? 'Admin edit access' : 'Organizer tools'}
+              </AppText>
+              <AppText variant="xs" color={colors.textMuted}>
+                {closed
+                  ? 'This tournament is closed. Admins can still correct any result.'
+                  : `Results stay editable for ${daysUntilClose} more day${daysUntilClose === 1 ? '' : 's'}.`}
+              </AppText>
+            </View>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => openUpdateSheet(null)}
+              style={[styles.primaryAction, { backgroundColor: colors.primary, marginTop: 0 }]}
+            >
+              <Ionicons name="add" size={16} color="#fff" />
+              <AppText variant="xs" weight="semiBold" color="#fff">
+                Add Match
+              </AppText>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {results.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -208,9 +375,11 @@ export default function TournamentResultScreen() {
               No result uploaded yet
             </AppText>
             <AppText variant="body" color={colors.textSecondary} center style={styles.emptyText}>
-              Once the organizer finishes the tournament, the full scorecard will appear here.
+              {closed
+                ? 'This tournament closed without any published scorecard.'
+                : 'Scorecards appear here as soon as the organizer uploads a completed match.'}
             </AppText>
-            {canUpdateResults ? (
+            {canManageResults ? (
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => openUpdateSheet(null)}
@@ -224,22 +393,36 @@ export default function TournamentResultScreen() {
             ) : null}
           </View>
         ) : (
-          <View style={styles.matchList}>
-            {results.map((result, index) => (
-              <AnimatedMatchCard
-                canUpdate={canUpdateResults}
-                colors={colors}
-                index={index}
-                key={result.id}
-                onUpdate={() => openUpdateSheet(result)}
-                result={result}
-                styles={styles}
-              />
-            ))}
-          </View>
+          groups.map((group) => (
+            <View key={group.categoryId} style={styles.groupBlock}>
+              <View style={styles.groupHeader}>
+                <AppText variant="title" weight="semiBold" style={{ flex: 1 }}>
+                  {group.categoryName}
+                </AppText>
+                <AppText variant="xs" color={colors.textMuted}>
+                  {group.matches.length} match{group.matches.length === 1 ? '' : 'es'}
+                </AppText>
+              </View>
+              <View style={styles.matchList}>
+                {group.matches.map((result, index) => (
+                  <AnimatedMatchCard
+                    canUpdate={canManageResults}
+                    colors={colors}
+                    index={index}
+                    isMine={isMyMatch(result, user?.id)}
+                    key={result.id}
+                    onUpdate={() => openUpdateSheet(result)}
+                    result={result}
+                    styles={styles}
+                    userId={user?.id}
+                  />
+                ))}
+              </View>
+            </View>
+          ))
         )}
       </ScrollView>
-      {tournament ? (
+      {canManageResults ? (
         <ResultEntrySheet
           initialResult={editingResult}
           onClose={() => {
@@ -269,20 +452,47 @@ function HeroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function MyStat({
+  color,
+  colors,
+  label,
+  value,
+}: {
+  color?: string;
+  colors: ReturnType<typeof useTheme>['colors'];
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={{ flex: 1 }}>
+      <AppText variant="xs" color={colors.textMuted}>
+        {label}
+      </AppText>
+      <AppText variant="title" weight="bold" color={color ?? colors.text}>
+        {value}
+      </AppText>
+    </View>
+  );
+}
+
 function AnimatedMatchCard({
   canUpdate,
   colors,
   index,
+  isMine,
   onUpdate,
   result,
   styles,
+  userId,
 }: {
   canUpdate: boolean;
   colors: ReturnType<typeof useTheme>['colors'];
   index: number;
+  isMine: boolean;
   onUpdate: () => void;
   result: TournamentMatchResult;
   styles: ReturnType<typeof makeStyles>;
+  userId?: string | null;
 }) {
   const cardAnim = useRef(new Animated.Value(0)).current;
   const barAnim = useRef(new Animated.Value(0)).current;
@@ -290,8 +500,8 @@ function AnimatedMatchCard({
   const player1Score = result.player1_score ?? 0;
   const player2Score = result.player2_score ?? 0;
   const maxScore = Math.max(player1Score, player2Score, 1);
-  const player1Won = result.winner_name === result.player1_name;
-  const player2Won = result.winner_name === result.player2_name;
+  const player1Won = wonSide(result, 1);
+  const player2Won = wonSide(result, 2);
   const translateY = cardAnim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] });
 
   useEffect(() => {
@@ -312,14 +522,20 @@ function AnimatedMatchCard({
   }, [barAnim, cardAnim, index]);
 
   return (
-    <Animated.View style={[styles.matchCard, { opacity: cardAnim, transform: [{ translateY }] }]}>
+    <Animated.View
+      style={[
+        styles.matchCard,
+        isMine ? styles.matchCardMine : null,
+        { opacity: cardAnim, transform: [{ translateY }] },
+      ]}
+    >
       <View style={styles.matchHeader}>
         <View style={{ flex: 1 }}>
           <AppText variant="bodyLg" weight="bold">
-            {result.category?.name ?? 'Match Result'}
+            Match #{result.match_number}
           </AppText>
           <AppText variant="caption" color={colors.textMuted}>
-            Match #{result.match_number}
+            {result.category?.name ?? 'Match Result'}
             {result.completed_at ? ` • ${formatDate(result.completed_at)}` : ''}
           </AppText>
         </View>
@@ -332,12 +548,32 @@ function AnimatedMatchCard({
               </AppText>
             </TouchableOpacity>
           ) : null}
-          <View style={styles.winnerBadge}>
-            <Ionicons name="trophy-outline" size={14} color="#B45309" />
-            <AppText variant="xs" weight="semiBold" color="#B45309">
-              Winner
-            </AppText>
-          </View>
+          {isMine ? (
+            <View
+              style={[
+                styles.mineBadge,
+                {
+                  backgroundColor: didIWin(result, userId) ? colors.win + '1A' : colors.loss + '1A',
+                  borderColor: didIWin(result, userId) ? colors.win : colors.loss,
+                },
+              ]}
+            >
+              <AppText
+                variant="xs"
+                weight="semiBold"
+                color={didIWin(result, userId) ? colors.win : colors.loss}
+              >
+                {didIWin(result, userId) ? 'You won' : 'You lost'}
+              </AppText>
+            </View>
+          ) : (
+            <View style={styles.winnerBadge}>
+              <Ionicons name="trophy-outline" size={14} color="#B45309" />
+              <AppText variant="xs" weight="semiBold" color="#B45309">
+                Winner
+              </AppText>
+            </View>
+          )}
         </View>
       </View>
 
@@ -354,6 +590,7 @@ function AnimatedMatchCard({
         <ResultScoreLine
           anim={barAnim}
           colors={colors}
+          isViewer={!!userId && result.player1_id === userId}
           maxScore={maxScore}
           name={result.player1_name ?? 'Side A'}
           score={player1Score}
@@ -363,6 +600,7 @@ function AnimatedMatchCard({
         <ResultScoreLine
           anim={barAnim}
           colors={colors}
+          isViewer={!!userId && result.player2_id === userId}
           maxScore={maxScore}
           name={result.player2_name ?? 'Side B'}
           score={player2Score}
@@ -389,10 +627,10 @@ function AnimatedMatchCard({
       <View style={styles.metaGrid}>
         <View style={styles.metaTile}>
           <AppText variant="xs" color={colors.textMuted}>
-            Final score
+            Games won
           </AppText>
           <AppText variant="body" weight="semiBold">
-            {result.score ?? `${player1Score}-${player2Score}`}
+            {player1Score}-{player2Score}
           </AppText>
         </View>
         <View style={styles.metaTile}>
@@ -420,6 +658,7 @@ function AnimatedMatchCard({
 function ResultScoreLine({
   anim,
   colors,
+  isViewer,
   maxScore,
   name,
   score,
@@ -428,6 +667,7 @@ function ResultScoreLine({
 }: {
   anim: Animated.Value;
   colors: ReturnType<typeof useTheme>['colors'];
+  isViewer: boolean;
   maxScore: number;
   name: string;
   score: number;
@@ -439,9 +679,17 @@ function ResultScoreLine({
   return (
     <View style={styles.scoreLine}>
       <View style={styles.scoreLineTop}>
-        <AppText variant="caption" weight={won ? 'semiBold' : 'regular'} style={{ flex: 1 }}>
+        <AppText variant="caption" weight={won ? 'semiBold' : 'regular'} numberOfLines={1}>
           {name}
         </AppText>
+        {isViewer ? (
+          <View style={styles.youChip}>
+            <AppText variant="xs" weight="semiBold" color={colors.primary}>
+              You
+            </AppText>
+          </View>
+        ) : null}
+        <View style={{ flex: 1 }} />
         <AppText variant="title" weight="bold" color={won ? colors.primary : colors.textSecondary}>
           {score}
         </AppText>
@@ -566,6 +814,84 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       marginTop: 18,
       padding: 12,
     },
+    myCard: {
+      backgroundColor: colors.surface,
+      borderColor: colors.primary + '40',
+      borderRadius: 16,
+      borderWidth: 1,
+      marginTop: 16,
+      padding: 15,
+    },
+    myHeader: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 10,
+    },
+    myIcon: {
+      alignItems: 'center',
+      backgroundColor: colors.primaryLight,
+      borderRadius: 999,
+      height: 34,
+      justifyContent: 'center',
+      width: 34,
+    },
+    myStatsRow: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      flexDirection: 'row',
+      gap: 10,
+      marginTop: 12,
+      padding: 12,
+    },
+    myList: {
+      gap: 8,
+      marginTop: 12,
+    },
+    myRow: {
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      borderColor: colors.border,
+      borderRadius: 12,
+      borderWidth: 1,
+      flexDirection: 'row',
+      gap: 10,
+      padding: 10,
+    },
+    myOutcome: {
+      alignItems: 'center',
+      borderRadius: 999,
+      height: 28,
+      justifyContent: 'center',
+      width: 28,
+    },
+    championCard: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderRadius: 16,
+      borderWidth: 1,
+      marginTop: 14,
+      padding: 15,
+    },
+    championList: {
+      gap: 10,
+      marginTop: 10,
+    },
+    championRow: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 8,
+    },
+    managerBar: {
+      alignItems: 'center',
+      backgroundColor: colors.primaryLight,
+      borderColor: colors.primary + '40',
+      borderRadius: 14,
+      borderWidth: 1,
+      flexDirection: 'row',
+      gap: 10,
+      marginTop: 14,
+      padding: 12,
+    },
     emptyCard: {
       alignItems: 'center',
       backgroundColor: colors.surface,
@@ -584,12 +910,20 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flexDirection: 'row',
       gap: 6,
       marginTop: 16,
-      paddingHorizontal: 16,
-      paddingVertical: 11,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    groupBlock: {
+      marginTop: 20,
+    },
+    groupHeader: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 10,
     },
     matchList: {
       gap: 14,
-      marginTop: 16,
     },
     matchCard: {
       backgroundColor: colors.surface,
@@ -602,6 +936,10 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       shadowOpacity: 1,
       shadowRadius: 8,
       elevation: 2,
+    },
+    matchCardMine: {
+      borderColor: colors.primary,
+      borderWidth: 1.5,
     },
     matchHeader: {
       alignItems: 'center',
@@ -634,6 +972,12 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingHorizontal: 8,
       paddingVertical: 4,
     },
+    mineBadge: {
+      borderRadius: 999,
+      borderWidth: 1,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
     winnerPanel: {
       backgroundColor: colors.primaryLight,
       borderColor: colors.border,
@@ -652,7 +996,15 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     scoreLineTop: {
       alignItems: 'center',
       flexDirection: 'row',
-      gap: 10,
+      gap: 8,
+    },
+    youChip: {
+      backgroundColor: colors.primaryLight,
+      borderColor: colors.primary,
+      borderRadius: 999,
+      borderWidth: 1,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
     },
     scoreTrack: {
       backgroundColor: colors.background,

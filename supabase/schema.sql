@@ -283,6 +283,30 @@ for each row
 execute function public.sync_category_registration_count();
 
 -- ────────────────────────────────────────────
+-- Auto-close: a tournament reads as finished one week after its end date.
+-- The app derives this for display and persists it whenever an organizer/admin
+-- opens the tournament. Schedule this sweep (pg_cron / Edge Function) so the
+-- stored status also settles for events nobody opens.
+-- ────────────────────────────────────────────
+create or replace function public.close_finished_tournaments()
+returns int as $$
+declare
+  closed_count int;
+begin
+  update public.tournaments
+  set status = 'completed'
+  where status in ('open', 'ongoing', 'paused')
+    and end_date + interval '7 days' <= now();
+
+  get diagnostics closed_count = row_count;
+  return closed_count;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+-- Example schedule (requires the pg_cron extension):
+-- select cron.schedule('close-finished-tournaments', '0 2 * * *', $$select public.close_finished_tournaments()$$);
+
+-- ────────────────────────────────────────────
 -- Matches
 -- ────────────────────────────────────────────
 create table public.matches (

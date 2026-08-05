@@ -9,7 +9,11 @@ import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { TournamentCard } from '~/components/TournamentCard';
 import { useTheme } from '~/hooks/useTheme';
 import { Tournament } from '~/types';
-import { fetchAdminTournaments, updateTournamentStatus } from '~/lib/tournaments';
+import {
+  fetchAdminTournaments,
+  getEffectiveTournamentStatus,
+  updateTournamentStatus,
+} from '~/lib/tournaments';
 import { useAlert } from '~/providers/AlertProvider';
 
 type StatusFilter = 'all' | 'draft' | 'open' | 'ongoing' | 'paused' | 'completed' | 'cancelled';
@@ -36,7 +40,9 @@ export default function AdminTournamentsScreen() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const filtered: Tournament[] =
-    filter === 'all' ? tournaments : tournaments.filter((t) => t.status === filter);
+    filter === 'all'
+      ? tournaments
+      : tournaments.filter((t) => getEffectiveTournamentStatus(t) === filter);
 
   const loadTournaments = useCallback(async () => {
     setLoading(true);

@@ -13,7 +13,11 @@ import { supabase } from '~/lib/supabase';
 import { Tournament } from '~/types';
 import { useAlert } from '~/providers/AlertProvider';
 import { DEFAULT_TOURNAMENT_CATEGORIES } from '~/constants/TournamentCategories';
-import { fetchOrganizerTournaments } from '~/lib/tournaments';
+import {
+  fetchOrganizerTournaments,
+  getEffectiveTournamentStatus,
+  isTournamentClosed,
+} from '~/lib/tournaments';
 
 type StatusFilter = 'all' | 'draft' | 'open' | 'ongoing' | 'paused' | 'completed';
 
@@ -154,12 +158,23 @@ export default function OrganizerMyTournamentsScreen() {
     router.push({ pathname: '/(app)/finish-tournament/[id]', params: { id: tournament.id } });
   };
 
-  const canFinishTournament = (tournament: Tournament) =>
-    tournament.status === 'open' ||
-    tournament.status === 'ongoing' ||
-    tournament.status === 'paused';
+  const openResults = (tournament: Tournament) => {
+    router.push({ pathname: '/(app)/tournament-result/[id]', params: { id: tournament.id } });
+  };
 
-  const filtered = filter === 'all' ? tournaments : tournaments.filter((t) => t.status === filter);
+  const canFinishTournament = (tournament: Tournament) => {
+    const status = getEffectiveTournamentStatus(tournament);
+    return status === 'open' || status === 'ongoing' || status === 'paused';
+  };
+
+  /** A single match can be recorded any time the event is live, without ending it. */
+  const canUploadMatchResult = (tournament: Tournament) =>
+    tournament.status !== 'draft' && !isTournamentClosed(tournament);
+
+  const filtered =
+    filter === 'all'
+      ? tournaments
+      : tournaments.filter((t) => getEffectiveTournamentStatus(t) === filter);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -241,6 +256,19 @@ export default function OrganizerMyTournamentsScreen() {
                         label: publishingId === item.id ? 'Publishing...' : 'Publish Tournament',
                         loading: publishingId === item.id,
                         onPress: () => requestPublish(item),
+                      },
+                    ]
+                  : []),
+                ...(item.status !== 'draft'
+                  ? [
+                      {
+                        icon: canUploadMatchResult(item)
+                          ? ('add-circle-outline' as const)
+                          : ('stats-chart-outline' as const),
+                        label: canUploadMatchResult(item)
+                          ? 'Add / Update Match Result'
+                          : 'Show Results',
+                        onPress: () => openResults(item),
                       },
                     ]
                   : []),
