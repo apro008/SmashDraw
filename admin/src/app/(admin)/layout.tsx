@@ -17,6 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <nav className="row" style={{ gap: 14 }}>
             <Link href="/tournaments">Tournaments</Link>
             <Link href="/players">Players</Link>
+            <Link href="/notifications">Notifications</Link>
           </nav>
         </div>
         <div className="topbar-user">

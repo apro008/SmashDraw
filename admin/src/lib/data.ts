@@ -82,6 +82,33 @@ export async function fetchMatches(tournamentId: string): Promise<Match[]> {
   return (data ?? []) as Match[];
 }
 
+/** Id and title only — for pickers that just need to name a tournament. */
+export async function fetchTournamentOptions() {
+  const { data, error } = await supabaseAdmin()
+    .from('tournaments')
+    .select('id,title,start_date')
+    .order('start_date', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as { id: string; title: string; start_date: string }[];
+}
+
+/**
+ * Distinct cities and states across all profiles, for the notification
+ * composer's suggestions. These only populate a datalist — the filter itself is
+ * an `ilike`, so a value missing from here can still be typed by hand.
+ */
+export async function fetchProfileLocations() {
+  const { data, error } = await supabaseAdmin().from('profiles').select('city,state').limit(1000);
+
+  if (error) throw error;
+  const rows = (data ?? []) as { city: string | null; state: string | null }[];
+  const collect = (pick: (row: (typeof rows)[number]) => string | null) =>
+    [...new Set(rows.map(pick).filter((value): value is string => !!value?.trim()))].sort();
+
+  return { cities: collect((row) => row.city), states: collect((row) => row.state) };
+}
+
 /** Every profile, newest first. Small enough a table to load in one go. */
 export async function fetchProfiles(): Promise<UserProfile[]> {
   const { data, error } = await supabaseAdmin()
