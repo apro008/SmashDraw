@@ -129,7 +129,11 @@ npm run typecheck
 
 1. Push this repo to GitHub.
 2. Vercel → **Add New → Project** → import `apro008/SmashDraw`.
-3. Set **Root Directory** to `admin`. Framework preset: Next.js.
+3. Set **Root Directory** to `admin`. Framework preset: Next.js (auto-detected
+   once the root directory is set). Vercel then installs from
+   `admin/package.json` and builds only this folder — the Expo app is ignored.
+   While you are on that setting, turn on the **Skip deployment** switch just
+   below it, so commits that touch nothing in `admin/` don't trigger a rebuild.
 4. Add all three environment variables under Settings → Environment Variables,
    for Production, Preview and Development. `SUPABASE_SERVICE_ROLE_KEY` must
    **not** carry a `NEXT_PUBLIC_` prefix.
