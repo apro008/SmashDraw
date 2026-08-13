@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '~/lib/supabase';
+import { GoogleSignInCancelled, signInWithGoogleNative, signOutFromGoogle } from '~/lib/googleAuth';
 import { UserProfile } from '~/types';
 
 interface AuthUser {
@@ -13,9 +14,17 @@ interface AuthState {
   profile: UserProfile | null;
   profileFetched: boolean;
   loading: boolean;
+  /** Separate from `loading` so the Google button spins without freezing the form. */
+  googleLoading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<boolean>;
-  signup: (email: string, password: string, name: string, role?: 'player' | 'organizer') => Promise<boolean>;
+  signup: (
+    email: string,
+    password: string,
+    name: string,
+    role?: 'player' | 'organizer'
+  ) => Promise<boolean>;
+  loginWithGoogle: () => Promise<boolean>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   setUser: (user: AuthUser | null) => void;
@@ -27,9 +36,15 @@ interface AuthState {
 function friendlyError(message: string): string {
   if (message.includes('Invalid login credentials')) return 'Incorrect email or password.';
   if (message.includes('Email not confirmed')) return 'Please verify your email first.';
-  if (message.includes('User already registered')) return 'An account with this email already exists.';
+  if (message.includes('User already registered'))
+    return 'An account with this email already exists.';
   if (message.includes('Password should be')) return 'Password must be at least 6 characters.';
   if (message.includes('Unable to validate email')) return 'Please enter a valid email address.';
+  // Google: the ID token's `aud` is not in Supabase's Authorized Client IDs list.
+  if (message.includes('Unacceptable audience'))
+    return 'Google sign-in is misconfigured. Add the Android client ID to Supabase → Auth → Providers → Google → Authorized Client IDs.';
+  if (message.includes('Play Services'))
+    return 'Google Play Services is unavailable or out of date on this device.';
   return message;
 }
 
@@ -38,6 +53,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   profile: null,
   profileFetched: false,
   loading: false,
+  googleLoading: false,
   error: null,
 
   login: async (email, password) => {
@@ -88,7 +104,58 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  loginWithGoogle: async () => {
+    set({ googleLoading: true, error: null });
+    try {
+      const { idToken, name, avatarUrl } = await signInWithGoogleNative();
+
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'google',
+        token: idToken,
+      });
+      if (error) throw error;
+
+      const authUser = data.user;
+      if (!authUser) throw new Error('Google sign-in did not return a user.');
+
+      // First Google sign-in for this account — seed a profile row. Returning
+      // users already have one, and `upsert` would otherwise wipe fields they
+      // have since edited, so only insert when nothing is there.
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      if (!existing) {
+        await supabase.from('profiles').insert({
+          id: authUser.id,
+          name: name ?? authUser.user_metadata?.full_name ?? authUser.email?.split('@')[0] ?? '',
+          email: authUser.email ?? null,
+          avatar_url: avatarUrl ?? authUser.user_metadata?.avatar_url ?? null,
+          role: 'player',
+          skill_level: 'beginner',
+          ranking_points: 0,
+          tournaments_played: 0,
+          tournaments_won: 0,
+        });
+      }
+
+      await get().fetchProfile(authUser.id);
+      return true;
+    } catch (err: any) {
+      // Backing out of the account picker is not an error worth showing.
+      if (err instanceof GoogleSignInCancelled) return false;
+      set({ error: friendlyError(err?.message ?? 'Google sign-in failed.') });
+      return false;
+    } finally {
+      set({ googleLoading: false });
+    }
+  },
+
   logout: async () => {
+    // Clear the cached Google account too, or the next sign-in skips the picker.
+    await signOutFromGoogle();
     await supabase.auth.signOut();
     set({ user: null, profile: null, profileFetched: false });
   },
@@ -116,13 +183,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
 
     // Read the intended role from the locally-cached session metadata (no extra network call).
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     const metaRole = session?.user?.user_metadata?.role as string | undefined;
 
     if (data) {
       // Auto-correct role if the signup metadata recorded a higher-privilege role but the DB
       // row has 'player' (can happen from the race-condition bug or a failed signup upsert).
-      if (metaRole && metaRole !== data.role && (metaRole === 'organizer' || metaRole === 'admin')) {
+      if (
+        metaRole &&
+        metaRole !== data.role &&
+        (metaRole === 'organizer' || metaRole === 'admin')
+      ) {
         await supabase.from('profiles').update({ role: metaRole }).eq('id', userId);
         set({ profile: { ...data, role: metaRole } as UserProfile, profileFetched: true });
       } else {

@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "515205542904",
+    "project_id": "smashdraw",
+    "storage_bucket": "smashdraw.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:515205542904:android:2e655b00f6da88df091c0d",
+        "android_client_info": {
+          "package_name": "com.smashdraw.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "515205542904-5f5j0c3nefbso0gccgc24cq53i9mde52.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAxutNGPEs0hY8p_r1nzdkOF5qRCZVpVuI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "515205542904-5f5j0c3nefbso0gccgc24cq53i9mde52.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

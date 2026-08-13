@@ -29,6 +29,7 @@ export const MOCK_TOURNAMENTS: Tournament[] = [
     payment_address: null,
     prize_pool: '₹50,000',
     max_courts: 8,
+    announced_at: null,
     created_at: '2025-05-01',
     categories: [
       {
@@ -89,6 +90,7 @@ export const MOCK_TOURNAMENTS: Tournament[] = [
     payment_address: null,
     prize_pool: '₹20,000',
     max_courts: 4,
+    announced_at: null,
     created_at: '2025-05-10',
     categories: [
       {
@@ -140,6 +142,7 @@ export const MOCK_TOURNAMENTS: Tournament[] = [
     payment_address: null,
     prize_pool: '₹15,000',
     max_courts: 3,
+    announced_at: null,
     created_at: '2025-05-15',
     categories: [
       {
@@ -192,6 +195,7 @@ export const MOCK_TOURNAMENTS: Tournament[] = [
     payment_address: null,
     prize_pool: '₹1,00,000',
     max_courts: 10,
+    announced_at: null,
     created_at: '2025-05-20',
     categories: [
       {

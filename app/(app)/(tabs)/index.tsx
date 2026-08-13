@@ -4,17 +4,15 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { AppText } from '~/components/AppText';
 import { SkeletonLoader } from '~/components/common/SkeletonLoader';
-import {
-  ActionTile,
-  MetricPill,
-  TournamentSnippet,
-} from '~/components/dashboard/DashboardWidgets';
+import { ActionTile, MetricPill, TournamentSnippet } from '~/components/dashboard/DashboardWidgets';
 import { useTheme } from '~/hooks/useTheme';
-import { fetchOpenTournaments } from '~/lib/tournaments';
+import { fetchOpenTournaments, getEffectiveTournamentStatus } from '~/lib/tournaments';
 import { useAlert } from '~/providers/AlertProvider';
 import { useAuthStore } from '~/store/useAuthStore';
+import { useNotificationStore } from '~/store/useNotificationStore';
 import { Tournament } from '~/types';
 
 export default function HomeScreen() {
@@ -24,6 +22,7 @@ export default function HomeScreen() {
   const user = useAuthStore((s) => s.user);
   const tabBarHeight = useBottomTabBarHeight();
   const { showAlert } = useAlert();
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
 
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -51,12 +50,14 @@ export default function HomeScreen() {
   );
 
   const dashboard = useMemo(() => buildDashboard(tournaments), [tournaments]);
+  // Effective status throughout, so an auto-closed event stops being advertised
+  // as open here while Explore already treats it as ended.
   const liveTournaments = useMemo(
-    () => tournaments.filter((t) => t.status === 'ongoing'),
+    () => tournaments.filter((t) => getEffectiveTournamentStatus(t) === 'ongoing'),
     [tournaments]
   );
   const openTournaments = useMemo(
-    () => tournaments.filter((t) => t.status === 'open'),
+    () => tournaments.filter((t) => getEffectiveTournamentStatus(t) === 'open'),
     [tournaments]
   );
   const displayName = profile?.name ?? user?.email?.split('@')[0] ?? 'Player';
@@ -95,13 +96,27 @@ export default function HomeScreen() {
               {displayName}
             </AppText>
           </View>
-          <TouchableOpacity style={styles.iconButton}>
+          <TouchableOpacity
+            accessibilityLabel={
+              unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'
+            }
+            accessibilityRole="button"
+            onPress={() => router.push('/(app)/notifications')}
+            style={styles.iconButton}
+          >
             <Ionicons name="notifications-outline" size={22} color={colors.text} />
+            {unreadCount > 0 ? (
+              <View style={styles.notificationBadge}>
+                <AppText variant="xs" weight="bold" color="#fff" style={styles.notificationCount}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </AppText>
+              </View>
+            ) : null}
           </TouchableOpacity>
         </View>
 
         {/* ── Hero ─────────────────────────────────────────────── */}
-        <View style={styles.hero}>
+        <Animated.View entering={FadeIn.duration(420)} style={styles.hero}>
           {/* Subtle court-line background pattern */}
           <View style={styles.courtOuter}>
             <View style={styles.courtCenterLine} />
@@ -161,7 +176,7 @@ export default function HomeScreen() {
               <Ionicons name="arrow-forward" size={14} color="#fff" />
             </View>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {loading ? (
           <View style={styles.loadSection}>
@@ -170,51 +185,56 @@ export default function HomeScreen() {
         ) : (
           <>
             {/* ── Metric Pills ──────────────────────────────────── */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.pillsRow}
-            >
-              <MetricPill
-                icon="calendar-outline"
-                label="Open events"
-                tone="#16A34A"
-                value={dashboard.openCount}
-              />
-              <MetricPill
-                icon="location-outline"
-                label="Cities"
-                tone="#7C3AED"
-                value={dashboard.cityCount}
-              />
-              <MetricPill
-                icon="albums-outline"
-                label="Categories"
-                tone="#F59E0B"
-                value={dashboard.categoryCount}
-              />
-              <MetricPill
-                icon="trophy-outline"
-                label="Prize events"
-                tone="#EF4444"
-                value={dashboard.prizeCount}
-              />
-            </ScrollView>
+            <Animated.View entering={FadeInDown.duration(300).delay(40)}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.pillsRow}
+              >
+                <MetricPill
+                  icon="calendar-outline"
+                  label="Open events"
+                  tone="#16A34A"
+                  value={dashboard.openCount}
+                />
+                <MetricPill
+                  icon="location-outline"
+                  label="Cities"
+                  tone="#7C3AED"
+                  value={dashboard.cityCount}
+                />
+                <MetricPill
+                  icon="albums-outline"
+                  label="Categories"
+                  tone="#F59E0B"
+                  value={dashboard.categoryCount}
+                />
+                <MetricPill
+                  icon="trophy-outline"
+                  label="Prize events"
+                  tone="#EF4444"
+                  value={dashboard.prizeCount}
+                />
+              </ScrollView>
+            </Animated.View>
 
             {/* ── Live Now ─────────────────────────────────────── */}
             {liveTournaments.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <View style={styles.liveHeaderRow}>
-                    <View style={styles.liveDot} />
-                    <AppText variant="title" weight="semiBold">
-                      Live Now
-                    </AppText>
-                  </View>
-                </View>
+              <Animated.View entering={FadeInDown.duration(300).delay(100)} style={styles.section}>
+                <SectionHeader
+                  colors={colors}
+                  count={liveTournaments.length}
+                  live
+                  styles={styles}
+                  title="Live Now"
+                  tone="#EF4444"
+                />
+                {/* Rails bleed past the section padding so cards scroll to the
+                    screen edge instead of being clipped by it. */}
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
+                  style={styles.rail}
                   contentContainerStyle={styles.snippetsRow}
                 >
                   {liveTournaments.map((t) => (
@@ -225,32 +245,47 @@ export default function HomeScreen() {
                     />
                   ))}
                 </ScrollView>
-              </View>
+              </Animated.View>
             )}
 
             {/* ── Open Tournaments ─────────────────────────────── */}
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <AppText variant="title" weight="semiBold">
-                  Open Tournaments
-                </AppText>
-                <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/explore')}>
-                  <AppText variant="label" color={colors.primary} weight="medium">
-                    See all
-                  </AppText>
-                </TouchableOpacity>
-              </View>
+            <Animated.View entering={FadeInDown.duration(300).delay(160)} style={styles.section}>
+              <SectionHeader
+                colors={colors}
+                count={openTournaments.length}
+                styles={styles}
+                title="Open Tournaments"
+                tone="#16A34A"
+                action={
+                  <TouchableOpacity
+                    onPress={() => router.push('/(app)/(tabs)/explore')}
+                    style={styles.seeAll}
+                    activeOpacity={0.7}
+                  >
+                    <AppText variant="label" color={colors.primary} weight="medium">
+                      See all
+                    </AppText>
+                    <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                  </TouchableOpacity>
+                }
+              />
               {openTournaments.length === 0 ? (
                 <View style={styles.emptyCard}>
-                  <Ionicons name="calendar-outline" size={28} color={colors.textMuted} />
-                  <AppText variant="body" color={colors.textSecondary} center>
-                    No open tournaments yet.
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons name="calendar-outline" size={24} color={colors.textMuted} />
+                  </View>
+                  <AppText variant="body" weight="medium" center>
+                    No open tournaments yet
+                  </AppText>
+                  <AppText variant="xs" color={colors.textMuted} center>
+                    New events will show up here as soon as they open.
                   </AppText>
                 </View>
               ) : (
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
+                  style={styles.rail}
                   contentContainerStyle={styles.snippetsRow}
                 >
                   {openTournaments.slice(0, 8).map((t) => (
@@ -262,13 +297,11 @@ export default function HomeScreen() {
                   ))}
                 </ScrollView>
               )}
-            </View>
+            </Animated.View>
 
             {/* ── Quick Actions ─────────────────────────────────── */}
-            <View style={styles.section}>
-              <AppText variant="title" weight="semiBold" style={styles.sectionTitle}>
-                Quick Actions
-              </AppText>
+            <Animated.View entering={FadeInDown.duration(300).delay(220)} style={styles.section}>
+              <SectionHeader colors={colors} styles={styles} title="Quick Actions" tone="#1A73E8" />
               <View style={styles.actionGrid}>
                 <ActionTile
                   icon="compass-outline"
@@ -285,11 +318,57 @@ export default function HomeScreen() {
                   tone="#16A34A"
                 />
               </View>
-            </View>
+            </Animated.View>
           </>
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/**
+ * Section heading with a coloured accent marker and an optional count chip.
+ * The marker is what ties a section to its status colour at a glance — red for
+ * live, green for open — instead of every heading reading identically.
+ */
+function SectionHeader({
+  action,
+  colors,
+  count,
+  live = false,
+  styles,
+  title,
+  tone,
+}: {
+  action?: React.ReactNode;
+  colors: ReturnType<typeof useTheme>['colors'];
+  count?: number;
+  live?: boolean;
+  styles: ReturnType<typeof makeStyles>;
+  title: string;
+  tone: string;
+}) {
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionTitleRow}>
+        {live ? (
+          <View style={styles.liveDot} />
+        ) : (
+          <View style={[styles.sectionAccent, { backgroundColor: tone }]} />
+        )}
+        <AppText variant="title" weight="semiBold">
+          {title}
+        </AppText>
+        {count !== undefined && count > 0 ? (
+          <View style={[styles.countChip, { backgroundColor: `${tone}18` }]}>
+            <AppText variant="xs" weight="bold" color={tone}>
+              {count}
+            </AppText>
+          </View>
+        ) : null}
+      </View>
+      {action}
+    </View>
   );
 }
 
@@ -301,7 +380,7 @@ function greeting() {
 }
 
 function buildDashboard(tournaments: Tournament[]) {
-  const openCount = tournaments.filter((t) => t.status === 'open').length;
+  const openCount = tournaments.filter((t) => getEffectiveTournamentStatus(t) === 'open').length;
   const cityCount = new Set(tournaments.map((t) => t.city)).size;
   const categoryCount = tournaments.reduce((sum, t) => sum + (t.categories?.length ?? 0), 0);
   const prizeCount = tournaments.filter((t) => t.categories?.some((c) => !!c.prize)).length;
@@ -335,6 +414,22 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       height: 40,
       justifyContent: 'center',
       width: 40,
+    },
+    notificationBadge: {
+      alignItems: 'center',
+      backgroundColor: colors.badge,
+      borderColor: colors.surface,
+      borderRadius: 9,
+      borderWidth: 2,
+      justifyContent: 'center',
+      minWidth: 18,
+      paddingHorizontal: 4,
+      position: 'absolute',
+      right: -4,
+      top: -4,
+    },
+    notificationCount: {
+      lineHeight: 14,
     },
 
     // Hero
@@ -450,13 +545,26 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       justifyContent: 'space-between',
       marginBottom: 12,
     },
-    sectionTitle: {
-      marginBottom: 12,
-    },
-    liveHeaderRow: {
+    sectionTitleRow: {
       alignItems: 'center',
       flexDirection: 'row',
-      gap: 7,
+      gap: 8,
+    },
+    sectionAccent: {
+      borderRadius: 2,
+      height: 17,
+      width: 3.5,
+    },
+    countChip: {
+      borderRadius: 999,
+      minWidth: 22,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+    },
+    seeAll: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 2,
     },
     liveDot: {
       backgroundColor: '#EF4444',
@@ -464,8 +572,15 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       height: 9,
       width: 9,
     },
+    // Cancels the section's horizontal padding so the rail spans the full
+    // screen; the inset moves onto the content container instead.
+    rail: {
+      marginHorizontal: -20,
+    },
     snippetsRow: {
       gap: 12,
+      paddingHorizontal: 20,
+      paddingVertical: 4,
     },
     actionGrid: {
       gap: 10,
@@ -475,9 +590,20 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       backgroundColor: colors.surface,
       borderColor: colors.border,
       borderRadius: 14,
+      borderStyle: 'dashed',
       borderWidth: 1,
-      gap: 8,
-      padding: 18,
+      gap: 6,
+      paddingHorizontal: 18,
+      paddingVertical: 22,
+    },
+    emptyIconWrap: {
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      borderRadius: 22,
+      height: 44,
+      justifyContent: 'center',
+      marginBottom: 2,
+      width: 44,
     },
   });
 }

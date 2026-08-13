@@ -5,6 +5,40 @@ export type CategoryName = string;
 export type RegistrationStatus = 'pending' | 'approved' | 'rejected' | 'waitlisted';
 export type Gender = 'male' | 'female' | 'other';
 
+export type NotificationType =
+  | 'registration_approved'
+  | 'registration_rejected'
+  | 'registration_waitlisted'
+  | 'registration_received'
+  | 'match_scheduled'
+  | 'match_result'
+  | 'tournament_status'
+  | 'tournament_published'
+  | 'announcement';
+
+export interface AppNotification {
+  id: string;
+  user_id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  tournament_id: string | null;
+  match_id: string | null;
+  data: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface PushToken {
+  id: string;
+  user_id: string;
+  token: string;
+  platform: 'ios' | 'android' | 'web';
+  device_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -50,6 +84,8 @@ export interface Tournament {
   payment_address: string | null;
   prize_pool: string | null;
   max_courts: number | null;
+  /** Stamped the first time the tournament opens, so it is announced only once. */
+  announced_at: string | null;
   created_at: string;
   categories?: TournamentCategory[];
 }
@@ -67,12 +103,15 @@ export interface TournamentCategory {
 
 export interface Registration {
   id: string;
-  user_id: string;
+  /** Null for walk-ins the organizer added by name — they have no account. */
+  user_id: string | null;
   category_id: string;
   tournament_id: string;
   status: RegistrationStatus;
   payment_screenshot_url: string | null;
   notes: string | null;
+  /** Set when an organizer or admin created the entry rather than the player. */
+  added_by: string | null;
   created_at: string;
   tournament?: Tournament;
   category?: TournamentCategory;

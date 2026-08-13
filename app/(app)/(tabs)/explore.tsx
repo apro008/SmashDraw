@@ -4,12 +4,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { AppText } from '~/components/AppText';
 import { SkeletonLoader } from '~/components/common/SkeletonLoader';
 import { TournamentCard } from '~/components/TournamentCard';
 import { useTheme } from '~/hooks/useTheme';
 import { Tournament, TournamentStatus } from '~/types';
-import { fetchDiscoverableTournaments, getEffectiveTournamentStatus } from '~/lib/tournaments';
+import {
+  fetchDiscoverableTournaments,
+  getEffectiveTournamentStatus,
+  isTournamentEnded,
+  sortTournamentsByStatus,
+} from '~/lib/tournaments';
 import { useAlert } from '~/providers/AlertProvider';
 
 const STATUSES: { label: string; value: TournamentStatus | 'all'; color?: string }[] = [
@@ -63,7 +69,7 @@ export default function ExploreScreen() {
   );
 
   const filtered = useMemo(() => {
-    return tournaments.filter((t) => {
+    const matches = tournaments.filter((t) => {
       const matchesQuery =
         !query ||
         t.title.toLowerCase().includes(query.toLowerCase()) ||
@@ -72,7 +78,13 @@ export default function ExploreScreen() {
       const matchesStatus = status === 'all' || getEffectiveTournamentStatus(t) === status;
       return matchesQuery && matchesCity && matchesStatus;
     });
+    // Open first, ended last, dates preserved within each status group.
+    return sortTournamentsByStatus(matches);
   }, [city, query, status, tournaments]);
+
+  // Where the retired block starts, so we can rule a line above it. -1 when the
+  // list is all-live or all-ended, in which case no divider is drawn.
+  const firstEndedIndex = useMemo(() => filtered.findIndex((t) => isTournamentEnded(t)), [filtered]);
 
   const hasActiveFilters = status !== 'all' || city !== 'All';
 
@@ -254,30 +266,46 @@ export default function ExploreScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(t) => t.id}
-          renderItem={({ item }) => (
-            <TournamentCard
-              tournament={item}
-              onPress={() =>
-                router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } })
-              }
-              menuActions={[
-                {
-                  icon: 'information-circle-outline',
-                  label: 'View Details',
-                  onPress: () =>
-                    router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } }),
-                },
-                {
-                  icon: 'stats-chart-outline',
-                  label: 'Show Result',
-                  onPress: () =>
-                    router.push({
-                      pathname: '/(app)/tournament-result/[id]',
-                      params: { id: item.id },
-                    }),
-                },
-              ]}
-            />
+          renderItem={({ item, index }) => (
+            <Animated.View
+              // Cap the stagger so items deep in the list don't wait on a long chain.
+              entering={FadeInDown.delay(Math.min(index, 8) * 40).duration(260)}
+              layout={LinearTransition.springify().damping(18)}
+            >
+              {index === firstEndedIndex && index > 0 ? (
+                <View style={styles.endedDivider}>
+                  <View style={styles.endedLine} />
+                  <AppText variant="xs" weight="semiBold" color={colors.textMuted}>
+                    ENDED
+                  </AppText>
+                  <View style={styles.endedLine} />
+                </View>
+              ) : null}
+              <TournamentCard
+                tournament={item}
+                dimmed={isTournamentEnded(item)}
+                onPress={() =>
+                  router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } })
+                }
+                menuActions={[
+                  {
+                    icon: 'information-circle-outline',
+                    label: 'View Details',
+                    onPress: () =>
+                      router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } }),
+                  },
+                  {
+                    icon: 'stats-chart-outline',
+                    label: 'Show Result',
+                    onPress: () =>
+                      router.push({
+                        pathname: '/(app)/tournament-result/[id]',
+                        params: { id: item.id },
+                      }),
+                  },
+                ]}
+              />
+            </Animated.View>
           )}
           ListHeaderComponent={
             <AppText
@@ -415,6 +443,18 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
 
     // List
+    endedDivider: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingTop: 2,
+      paddingBottom: 14,
+    },
+    endedLine: {
+      flex: 1,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.border,
+    },
     countLabel: { paddingBottom: 8 },
     list: { paddingHorizontal: 16, paddingTop: 8 },
     skeletonList: { paddingHorizontal: 16, paddingTop: 8 },

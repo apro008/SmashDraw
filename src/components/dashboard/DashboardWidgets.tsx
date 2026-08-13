@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useMemo, useRef } from 'react';
+import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { AppText } from '~/components/AppText';
 import { useTheme } from '~/hooks/useTheme';
+import { getEffectiveTournamentStatus } from '~/lib/tournaments';
 import { Tournament } from '~/types';
 
 export interface ChartDatum {
@@ -139,40 +140,60 @@ export function TournamentSnippet({ tournament, onPress }: TournamentSnippetProp
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const bannerColor = snippetHashColor(tournament.id);
-  const status = SNIPPET_STATUS[tournament.status] ?? SNIPPET_STATUS.open;
+  // Effective status, so an event past its close window reads as Ended here too.
+  const status = SNIPPET_STATUS[getEffectiveTournamentStatus(tournament)] ?? SNIPPET_STATUS.open;
+
+  const scale = useRef(new Animated.Value(1)).current;
+  const springTo = (toValue: number) =>
+    Animated.spring(scale, { toValue, useNativeDriver: true, friction: 8, tension: 150 }).start();
 
   return (
-    <TouchableOpacity style={styles.snippet} onPress={onPress} activeOpacity={0.85}>
-      <View style={[styles.snippetBanner, { backgroundColor: bannerColor }]}>
-        {/* Subtle court decoration */}
-        <View style={styles.snippetCourtLine} />
-        <View style={[styles.snippetCourtVLine, { left: '38%' }]} />
-        <View style={styles.snippetStatusPill}>
-          <View style={[styles.snippetStatusBg, { backgroundColor: status.bg }]}>
-            <AppText variant="xs" weight="bold" color="#fff" numberOfLines={1}>
-              {status.label}
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <TouchableOpacity
+        style={styles.snippet}
+        onPress={onPress}
+        onPressIn={() => springTo(0.96)}
+        onPressOut={() => springTo(1)}
+        activeOpacity={1}
+      >
+        <View style={[styles.snippetBanner, { backgroundColor: bannerColor }]}>
+          {/* Subtle court decoration */}
+          <View style={styles.snippetCourtLine} />
+          <View style={[styles.snippetCourtVLine, { left: '38%' }]} />
+          <View style={styles.snippetStatusPill}>
+            <View style={[styles.snippetStatusBg, { backgroundColor: status.bg }]}>
+              <AppText variant="xs" weight="bold" color="#fff" numberOfLines={1}>
+                {status.label}
+              </AppText>
+            </View>
+          </View>
+        </View>
+        <View style={styles.snippetBody}>
+          <AppText variant="label" weight="semiBold" numberOfLines={2} style={styles.snippetTitle}>
+            {tournament.title}
+          </AppText>
+          <View style={styles.snippetRow}>
+            <Ionicons name="location-outline" size={11} color={colors.textMuted} />
+            <AppText
+              variant="xs"
+              color={colors.textSecondary}
+              numberOfLines={1}
+              style={{ flex: 1 }}
+            >
+              {tournament.city}
+            </AppText>
+          </View>
+          <View style={styles.snippetRow}>
+            <Ionicons name="calendar-outline" size={11} color={colors.textMuted} />
+            <AppText variant="xs" color={colors.textMuted}>
+              {formatSnippetDate(tournament.start_date)}
             </AppText>
           </View>
         </View>
-      </View>
-      <View style={styles.snippetBody}>
-        <AppText variant="label" weight="semiBold" numberOfLines={2}>
-          {tournament.title}
-        </AppText>
-        <View style={styles.snippetRow}>
-          <Ionicons name="location-outline" size={11} color={colors.textMuted} />
-          <AppText variant="xs" color={colors.textSecondary} numberOfLines={1} style={{ flex: 1 }}>
-            {tournament.city}
-          </AppText>
-        </View>
-        <View style={styles.snippetRow}>
-          <Ionicons name="calendar-outline" size={11} color={colors.textMuted} />
-          <AppText variant="xs" color={colors.textMuted}>
-            {formatSnippetDate(tournament.start_date)}
-          </AppText>
-        </View>
-      </View>
-    </TouchableOpacity>
+        {/* Accent hairline picking up the banner colour. */}
+        <View style={[styles.snippetAccent, { backgroundColor: bannerColor }]} />
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -382,8 +403,23 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderColor: colors.border,
       borderRadius: 14,
       borderWidth: 1,
+      elevation: 2,
       overflow: 'hidden',
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 1,
+      shadowRadius: 6,
       width: 180,
+    },
+    snippetTitle: {
+      minHeight: 34,
+    },
+    snippetAccent: {
+      bottom: 0,
+      height: 3,
+      left: 0,
+      position: 'absolute',
+      right: 0,
     },
     snippetBanner: {
       height: 72,

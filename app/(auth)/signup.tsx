@@ -1,25 +1,33 @@
-import { useState, useMemo, useRef } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { useMemo } from 'react';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Link, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '~/components/AppText';
-import { AppButton } from '~/components/AppButton';
+import { GoogleSignInButton } from '~/components/auth/GoogleSignInButton';
 import { useAuthStore } from '~/store/useAuthStore';
 import { useTheme } from '~/hooks/useTheme';
-import { useAlert } from '~/providers/AlertProvider';
 
+/**
+ * Sign-up is Google-only. The email/password form is commented out below rather
+ * than deleted — existing email accounts can still sign in from the login
+ * screen, but new accounts come through Google.
+ */
 export default function Signup() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
+  // `error` is shared with the Google flow, so it still has a job here.
+  const { error } = useAuthStore();
+
+  /* Email/password sign-up state — restore alongside the form JSX below.
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const { signup, loading, error, clearError } = useAuthStore();
+  const { signup, loading, clearError } = useAuthStore();
   const { showAlert } = useAlert();
   const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
@@ -61,6 +69,7 @@ export default function Signup() {
       });
     }
   };
+  */
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -88,7 +97,32 @@ export default function Signup() {
 
         {/* Form card */}
         <View style={styles.card}>
-          {/* Full name */}
+          <AppText variant="heading" weight="bold">
+            Sign up with Google
+          </AppText>
+          <AppText variant="body" color={colors.textSecondary} style={{ marginTop: 4 }}>
+            Use your Google account to set up your SmashDraw profile.
+          </AppText>
+
+          {error ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
+              <AppText variant="label" color={colors.danger} style={{ marginLeft: 6, flex: 1 }}>
+                {error}
+              </AppText>
+            </View>
+          ) : null}
+
+          <View style={styles.googleWrap}>
+            <GoogleSignInButton label="Sign up with Google" />
+          </View>
+
+          {/* Email/password sign-up form — hidden for now. To restore, uncomment
+              this block and the state above, and re-add these imports:
+              useState/useRef from react, TextInput from react-native,
+              AppButton, AuthDivider, and useAlert.
+
+          // Full name
           <View style={styles.field}>
             <AppText
               variant="label"
@@ -111,7 +145,7 @@ export default function Signup() {
             />
           </View>
 
-          {/* Email */}
+          // Email
           <View style={styles.field}>
             <AppText
               variant="label"
@@ -137,7 +171,7 @@ export default function Signup() {
             />
           </View>
 
-          {/* Password */}
+          // Password
           <View style={styles.field}>
             <AppText
               variant="label"
@@ -173,7 +207,7 @@ export default function Signup() {
             </View>
           </View>
 
-          {/* Confirm Password */}
+          // Confirm Password
           <View style={styles.field}>
             <AppText
               variant="label"
@@ -196,21 +230,15 @@ export default function Signup() {
             />
           </View>
 
-          {error ? (
-            <View style={styles.errorBox}>
-              <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
-              <AppText variant="label" color={colors.danger} style={{ marginLeft: 6, flex: 1 }}>
-                {error}
-              </AppText>
-            </View>
-          ) : null}
-
           <AppButton
             title="Create Account"
             onPress={handleSignup}
             loading={loading}
             style={styles.btn}
           />
+
+          <AuthDivider />
+          */}
 
           <View style={styles.loginRow}>
             <AppText variant="body" color={colors.textSecondary}>
@@ -268,6 +296,23 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingTop: 32,
       minHeight: 500,
     },
+    googleWrap: {
+      marginTop: 24,
+    },
+    errorBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 12,
+      padding: 12,
+      backgroundColor: '#FEE2E2',
+      borderRadius: 10,
+    },
+    loginRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      marginTop: 20,
+    },
+    // The styles below belong to the commented-out email/password form.
     field: {
       marginTop: 18,
     },
@@ -292,21 +337,8 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       bottom: 0,
       justifyContent: 'center',
     },
-    errorBox: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginTop: 12,
-      padding: 12,
-      backgroundColor: '#FEE2E2',
-      borderRadius: 10,
-    },
     btn: {
       marginTop: 24,
-    },
-    loginRow: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      marginTop: 20,
     },
   });
 }

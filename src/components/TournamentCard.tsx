@@ -51,7 +51,15 @@ interface Props {
   action?: CardAction;
   secondaryAction?: CardAction;
   menuActions?: CardAction[];
+  /**
+   * Visually retires the card — ended/cancelled events keep their place in the
+   * list but stop competing with live ones for attention.
+   */
+  dimmed?: boolean;
 }
+
+/** Muted banner for retired cards, so the bright hash colour stops shouting. */
+const DIMMED_BANNER = '#94A3B8';
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
@@ -97,10 +105,12 @@ export function TournamentCard({
   tournament,
   onPress,
   compact = false,
+  dimmed = false,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const hasMenu = !!menuActions && menuActions.length > 0;
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const onPressIn = () =>
@@ -119,7 +129,7 @@ export function TournamentCard({
     }).start();
 
   const statusCfg = STATUS_CONFIG[getEffectiveTournamentStatus(tournament)] ?? STATUS_CONFIG.open;
-  const bannerColor = hashColor(tournament.id);
+  const bannerColor = dimmed ? DIMMED_BANNER : hashColor(tournament.id);
   const dateRange =
     tournament.start_date === tournament.end_date
       ? formatDate(tournament.start_date)
@@ -130,9 +140,9 @@ export function TournamentCard({
       : null;
 
   return (
-    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+    <Animated.View style={{ transform: [{ scale: scaleAnim }], opacity: dimmed ? 0.66 : 1 }}>
       <TouchableOpacity
-        style={styles.card}
+        style={[styles.card, dimmed && styles.cardDimmed]}
         onPress={onPress}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
@@ -227,7 +237,17 @@ export function TournamentCard({
             </View>
           ) : null}
 
-          <AppText variant="title" weight="semiBold" numberOfLines={1}>
+          {/*
+            Wraps to a second line, then ellipsises. The right inset clears the
+            absolutely-positioned menu button — without it the text runs
+            underneath the ⋮ instead of truncating before it.
+          */}
+          <AppText
+            variant="title"
+            weight="semiBold"
+            numberOfLines={2}
+            style={hasMenu ? styles.titleWithMenu : undefined}
+          >
             {tournament.title}
           </AppText>
 
@@ -378,6 +398,13 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       shadowRadius: 8,
       elevation: 3,
     },
+    // Retired cards also drop their lift, so they sit flatter on the page.
+    cardDimmed: {
+      shadowOpacity: 0,
+      elevation: 0,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
 
     // Banner
     banner: {
@@ -476,6 +503,14 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       padding: 14,
       gap: 5,
       position: 'relative',
+    },
+    /*
+     * Clears the ⋮ button: it sits 10 from the card edge and is 32 wide, while
+     * the body is padded 14 — so the text must give up (10 + 32) - 14 = 28,
+     * plus a little breathing room.
+     */
+    titleWithMenu: {
+      paddingRight: 34,
     },
     menuButton: {
       position: 'absolute',

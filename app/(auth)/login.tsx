@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '~/components/AppText';
 import { AppButton } from '~/components/AppButton';
+import { AuthDivider, GoogleSignInButton } from '~/components/auth/GoogleSignInButton';
 import { useAuthStore } from '~/store/useAuthStore';
 import { useTheme } from '~/hooks/useTheme';
 
@@ -54,6 +55,13 @@ export default function Login() {
             <AppText variant="body" color={colors.textSecondary} style={{ marginTop: 4 }}>
               Sign in to your account
             </AppText>
+
+            {/* Google is the primary way in, so it sits above the password form. */}
+            <View style={styles.googleTop}>
+              <GoogleSignInButton label="Sign in with Google" disabled={loading} />
+            </View>
+
+            <AuthDivider />
 
             {/* Email */}
             <View style={styles.field}>
@@ -114,6 +122,7 @@ export default function Login() {
               </View>
             ) : null}
 
+            {/* Forgot password — hidden for now. Restore by uncommenting.
             <TouchableOpacity style={styles.forgotRow}>
               <Link href="/(auth)/forgot-password">
                 <AppText variant="label" color={colors.primary} weight="medium">
@@ -121,6 +130,7 @@ export default function Login() {
                 </AppText>
               </Link>
             </TouchableOpacity>
+            */}
 
             <AppButton title="Sign In" onPress={handleLogin} loading={loading} style={styles.btn} />
 
@@ -206,6 +216,10 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       backgroundColor: '#FEE2E2',
       borderRadius: 10,
     },
+    googleTop: {
+      marginTop: 24,
+    },
+    // Kept for the commented-out "Forgot password?" link above.
     forgotRow: {
       alignSelf: 'flex-end',
       marginTop: 10,

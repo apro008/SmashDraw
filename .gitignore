@@ -59,3 +59,16 @@ yarn-error.*
 *.tsbuildinfo
 
 # @end expo-cli
+# Local SQL containing real secrets (service role key, etc.) — never commit
+*.local.sql
+
+# Firebase service account key for FCM push — real secret, never commit.
+# Leading wildcards matter: Firebase prefixes the filename with the project id
+# (smashdraw-firebase-adminsdk-....json), so anchored patterns miss it.
+*firebase-adminsdk*.json
+*service-account*.json
+*serviceaccount*.json
+
+# NOTE: google-services.json is deliberately NOT ignored. It ships inside the
+# APK and holds no secrets, and EAS builds from the git archive — ignoring it
+# would drop it from cloud builds and break FCM there.

@@ -61,6 +61,51 @@ export function getEffectiveTournamentStatus(
   return isTournamentClosed(tournament, now) ? 'completed' : tournament.status;
 }
 
+/**
+ * Display order for any tournament list. Anything a player can still act on
+ * floats up; finished events sink. Every list screen sorts through this so the
+ * ordering never disagrees between Home, Explore and My Events.
+ */
+const STATUS_RANK: Record<TournamentStatus, number> = {
+  open: 0,
+  ongoing: 1,
+  paused: 2,
+  draft: 3,
+  completed: 4,
+  cancelled: 5,
+};
+
+/** Lower sorts earlier. Uses the *effective* status, so auto-closed events rank as ended. */
+export function getTournamentStatusRank(
+  tournament: Pick<Tournament, 'end_date' | 'status'>,
+  now: Date = new Date()
+) {
+  return STATUS_RANK[getEffectiveTournamentStatus(tournament, now)] ?? 99;
+}
+
+/** True once the event is over — used to dim it in lists. */
+export function isTournamentEnded(
+  tournament: Pick<Tournament, 'end_date' | 'status'>,
+  now: Date = new Date()
+) {
+  const status = getEffectiveTournamentStatus(tournament, now);
+  return status === 'completed' || status === 'cancelled';
+}
+
+/**
+ * Status-ranked copy of the list. `Array.sort` is stable, so tournaments with
+ * the same status keep whatever order the caller passed in — the queries
+ * already sort by date, and that ordering survives inside each status group.
+ */
+export function sortTournamentsByStatus<T extends Pick<Tournament, 'end_date' | 'status'>>(
+  tournaments: T[],
+  now: Date = new Date()
+): T[] {
+  return [...tournaments].sort(
+    (a, b) => getTournamentStatusRank(a, now) - getTournamentStatusRank(b, now)
+  );
+}
+
 /** Whole days left before the tournament closes for the organizer (negative once closed). */
 export function getDaysUntilClose(
   tournament: Pick<Tournament, 'end_date'>,
@@ -227,6 +272,64 @@ export async function updateRegistrationStatus(
     throw new Error('Registration status was not updated. Please check organizer access.');
   }
   return updatedRow;
+}
+
+export interface AddTournamentEntryInput {
+  tournamentId: string;
+  categoryId: string;
+  playerName: string;
+  partnerName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  /** Set to attach the entry to a real SmashDraw account, so they get push. */
+  userId?: string | null;
+  notes?: string | null;
+}
+
+/** Organizer/admin adds a player or team straight onto the roster, already approved. */
+export async function addTournamentEntry(input: AddTournamentEntryInput) {
+  const { data, error } = await supabase.rpc('add_tournament_entry', {
+    p_tournament_id: input.tournamentId,
+    p_category_id: input.categoryId,
+    p_player_name: input.playerName,
+    p_partner_name: input.partnerName ?? null,
+    p_phone: input.phone ?? null,
+    p_email: input.email ?? null,
+    p_user_id: input.userId ?? null,
+    p_notes: input.notes ?? null,
+  });
+
+  if (error) throw error;
+  return data as string;
+}
+
+/** Only removes entries an organizer added; player registrations are declined instead. */
+export async function removeTournamentEntry(registrationId: string) {
+  const { data, error } = await supabase.rpc('remove_tournament_entry', {
+    p_registration_id: registrationId,
+  });
+
+  if (error) throw error;
+  if (data !== true) {
+    throw new Error('That entry could not be removed. Only organizer-added entries can be.');
+  }
+}
+
+/** Name/email lookup for attaching an organizer-added entry to a real account. */
+export async function searchPlayers(query: string, limit = 8) {
+  // `or()` takes a filter string, so anything with meaning in PostgREST's grammar
+  // has to come out of the term or the user could rewrite the whole condition.
+  const term = query.trim().replace(/[,()*%\\"]/g, '');
+  if (term.length < 2) return [];
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id,name,email,phone,city,state')
+    .or(`name.ilike.%${term}%,email.ilike.%${term}%`)
+    .limit(limit);
+
+  if (error) throw error;
+  return (data ?? []) as Pick<UserProfile, 'id' | 'name' | 'email' | 'phone' | 'city' | 'state'>[];
 }
 
 export async function updateTournamentStatus(tournamentId: string, status: TournamentStatus) {

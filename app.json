@@ -28,8 +28,13 @@
         "color": "#1A73E8"
       },
       "package": "com.smashdraw.app",
+      "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
-      "permissions": ["android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR"]
+      "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -72,7 +77,16 @@
           "remindersPermission": "Allow SmashDraw to add tournament reminders."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#1A73E8",
+          "defaultChannel": "default"
+        }
+      ],
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true

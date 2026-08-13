@@ -6,6 +6,7 @@ module.exports = defineConfig([
   ...expoConfig,
   prettierConfig,
   {
-    ignores: ['dist/**', 'node_modules/**', '.expo/**'],
+    // Edge Functions run on Deno with JSR/URL imports — linted by the Supabase CLI.
+    ignores: ['dist/**', 'node_modules/**', '.expo/**', 'supabase/functions/**'],
   },
 ]);

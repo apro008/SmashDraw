@@ -21,10 +21,12 @@ import {
   getEffectiveTournamentStatus,
   getResultAccess,
   isTournamentClosed,
+  removeTournamentEntry,
   TournamentRegistrationDetails,
   updateRegistrationStatus,
   updateTournamentStatus,
 } from '~/lib/tournaments';
+import { AddEntrySheet } from '~/components/tournament/AddEntrySheet';
 import { RegistrationSheet } from '~/components/tournament/RegistrationSheet';
 import { ResultEntrySheet } from '~/components/tournament/ResultEntrySheet';
 import { useAuthStore } from '~/store/useAuthStore';
@@ -480,12 +482,14 @@ function parseRegistrationNotes(notes: string | null) {
 
 function RegistrationRow({
   registration,
+  onRemove,
   onStatusChange,
   statusLoading,
   colors,
   styles,
 }: {
   registration: TournamentRegistrationDetails;
+  onRemove?: (id: string) => void;
   onStatusChange?: (id: string, status: 'approved' | 'rejected' | 'waitlisted') => void;
   statusLoading?: boolean;
   colors: any;
@@ -497,6 +501,7 @@ function RegistrationRow({
   const email = details.email ?? registration.player?.email;
   const statusCfg = REGISTRATION_STATUS_CONFIG[registration.status];
   const catColor = getCategoryColor(registration.category?.name ?? '');
+  const addedByOrganizer = !!registration.added_by;
 
   return (
     <View style={styles.registrationRow}>
@@ -508,6 +513,7 @@ function RegistrationRow({
           </AppText>
           <AppText variant="caption" color={colors.textSecondary}>
             {registration.category?.name ?? 'Category'}
+            {addedByOrganizer ? ' · added by organizer' : ''}
           </AppText>
         </View>
         <View style={[styles.registrationStatusPill, { backgroundColor: statusCfg.bg }]}>
@@ -539,9 +545,22 @@ function RegistrationRow({
           </AppText>
         ) : null}
       </View>
-      {onStatusChange ? (
+      {onStatusChange || (onRemove && addedByOrganizer) ? (
         <View style={styles.registrationActions}>
-          {registration.status !== 'approved' ? (
+          {onRemove && addedByOrganizer ? (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              disabled={statusLoading}
+              onPress={() => onRemove(registration.id)}
+              style={[styles.statusAction, styles.rejectAction, statusLoading && styles.disabled]}
+            >
+              <Ionicons name="trash-outline" size={13} color="#DC2626" />
+              <AppText variant="xs" weight="semiBold" color="#DC2626">
+                Remove
+              </AppText>
+            </TouchableOpacity>
+          ) : null}
+          {onStatusChange && registration.status !== 'approved' ? (
             <TouchableOpacity
               activeOpacity={0.8}
               disabled={statusLoading}
@@ -554,7 +573,7 @@ function RegistrationRow({
               </AppText>
             </TouchableOpacity>
           ) : null}
-          {registration.status !== 'waitlisted' ? (
+          {onStatusChange && registration.status !== 'waitlisted' ? (
             <TouchableOpacity
               activeOpacity={0.8}
               disabled={statusLoading}
@@ -567,7 +586,7 @@ function RegistrationRow({
               </AppText>
             </TouchableOpacity>
           ) : null}
-          {registration.status !== 'rejected' ? (
+          {onStatusChange && registration.status !== 'rejected' ? (
             <TouchableOpacity
               activeOpacity={0.8}
               disabled={statusLoading}
@@ -634,6 +653,7 @@ function getCategoryStatusCounts(
 function CategoryRegistrationSection({
   catName,
   items,
+  onRemove,
   onStatusChange,
   updatingId,
   colors,
@@ -642,6 +662,7 @@ function CategoryRegistrationSection({
 }: {
   catName: string;
   items: TournamentRegistrationDetails[];
+  onRemove?: (id: string) => void;
   onStatusChange?: (id: string, status: 'approved' | 'rejected' | 'waitlisted') => void;
   updatingId: string | null;
   colors: any;
@@ -713,6 +734,7 @@ function CategoryRegistrationSection({
             <RegistrationRow
               key={r.id}
               registration={r}
+              onRemove={onRemove}
               onStatusChange={onStatusChange}
               statusLoading={updatingId === r.id}
               colors={colors}
@@ -730,7 +752,7 @@ export default function TournamentDetailScreen() {
   const { finishMatch, id } = useLocalSearchParams<{ finishMatch?: string; id: string }>();
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { showAlert } = useAlert();
+  const { confirm, showAlert } = useAlert();
   const user = useAuthStore((s) => s.user);
   const profile = useAuthStore((s) => s.profile);
 
@@ -744,6 +766,7 @@ export default function TournamentDetailScreen() {
   const [updatingRegistrationId, setUpdatingRegistrationId] = useState<string | null>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [resultEntryVisible, setResultEntryVisible] = useState(false);
+  const [addEntryVisible, setAddEntryVisible] = useState(false);
   const [handledFinishParam, setHandledFinishParam] = useState(false);
 
   const loadTournament = useCallback(async () => {
@@ -935,6 +958,30 @@ export default function TournamentDetailScreen() {
     } finally {
       setUpdatingRegistrationId(null);
     }
+  };
+
+  const handleRemoveEntry = (registrationId: string) => {
+    confirm({
+      title: 'Remove entry?',
+      message: 'This deletes the entry you added. Player registrations are declined, not removed.',
+      confirmText: 'Remove',
+      destructive: true,
+      onConfirm: async () => {
+        setUpdatingRegistrationId(registrationId);
+        try {
+          await removeTournamentEntry(registrationId);
+          await loadTournament();
+        } catch (err: any) {
+          showAlert({
+            type: 'danger',
+            title: 'Could not remove entry',
+            message: err?.message ?? 'Please try again.',
+          });
+        } finally {
+          setUpdatingRegistrationId(null);
+        }
+      },
+    });
   };
 
   const handleTournamentStatusChange = async (status: TournamentStatus) => {
@@ -1355,6 +1402,35 @@ export default function TournamentDetailScreen() {
                 </AppText>
               </View>
             </View>
+            {canManageResults ? (
+              <View style={styles.rosterActions}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setAddEntryVisible(true)}
+                  style={styles.rosterAction}
+                >
+                  <Ionicons name="person-add-outline" size={15} color={colors.primary} />
+                  <AppText variant="caption" weight="semiBold" color={colors.primary}>
+                    Add Entry
+                  </AppText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(app)/draw/[id]',
+                      params: { id: tournament.id },
+                    })
+                  }
+                  style={styles.rosterAction}
+                >
+                  <Ionicons name="git-branch-outline" size={15} color={colors.primary} />
+                  <AppText variant="caption" weight="semiBold" color={colors.primary}>
+                    Manage Draw
+                  </AppText>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             {pendingCount > 0 ? (
               <View style={styles.pendingNotice}>
                 <Ionicons name="hourglass-outline" size={14} color="#D97706" />
@@ -1383,6 +1459,7 @@ export default function TournamentDetailScreen() {
                           <RegistrationRow
                             key={r.id}
                             registration={r}
+                            onRemove={canManageResults ? handleRemoveEntry : undefined}
                             onStatusChange={canChange}
                             statusLoading={updatingRegistrationId === r.id}
                             colors={colors}
@@ -1399,6 +1476,7 @@ export default function TournamentDetailScreen() {
                           key={group.catId}
                           catName={group.catName}
                           items={group.items}
+                          onRemove={canManageResults ? handleRemoveEntry : undefined}
                           onStatusChange={canChange}
                           updatingId={updatingRegistrationId}
                           colors={colors}
@@ -1529,13 +1607,21 @@ export default function TournamentDetailScreen() {
         registeredCategoryIds={registeredCategoryIds}
       />
       {canManageResults ? (
-        <ResultEntrySheet
-          tournament={tournament}
-          registrations={registrations}
-          visible={resultEntryVisible}
-          onClose={() => setResultEntryVisible(false)}
-          onSaved={loadTournament}
-        />
+        <>
+          <ResultEntrySheet
+            tournament={tournament}
+            registrations={registrations}
+            visible={resultEntryVisible}
+            onClose={() => setResultEntryVisible(false)}
+            onSaved={loadTournament}
+          />
+          <AddEntrySheet
+            tournament={tournament}
+            visible={addEntryVisible}
+            onClose={() => setAddEntryVisible(false)}
+            onAdded={loadTournament}
+          />
+        </>
       ) : null}
     </SafeAreaView>
   );
@@ -1852,6 +1938,20 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
 
     // Registrations
+    rosterActions: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 10,
+    },
+    rosterAction: {
+      alignItems: 'center',
+      backgroundColor: colors.primaryLight,
+      borderRadius: 999,
+      flexDirection: 'row',
+      gap: 5,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+    },
     registrationsList: { gap: 12 },
     registrationRow: {
       borderBottomWidth: StyleSheet.hairlineWidth,

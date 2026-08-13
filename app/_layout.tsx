@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { AuthProvider } from '~/providers/AuthProvider';
 import { AlertProvider } from '~/providers/AlertProvider';
+import { NotificationProvider } from '~/providers/NotificationProvider';
 import { useTheme } from '~/hooks/useTheme';
 import { SplashLoader } from '~/components/SplashLoader';
 
@@ -32,7 +33,9 @@ export default function RootLayout() {
       <KeyboardProvider>
         <AuthProvider>
           <AlertProvider>
-            <RootStack />
+            <NotificationProvider>
+              <RootStack />
+            </NotificationProvider>
           </AlertProvider>
         </AuthProvider>
       </KeyboardProvider>
