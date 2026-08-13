@@ -156,6 +156,30 @@ export function roundLabel(round: number, totalRounds: number) {
 // Persistence
 // ────────────────────────────────────────────
 
+/**
+ * Every match in the tournament, all categories. "Anyone can view matches", so
+ * this is readable by players too — it is what backs the read-only bracket and
+ * the organizer's list of matches still waiting on a score.
+ */
+export async function fetchTournamentMatches(tournamentId: string) {
+  const { data, error } = await supabase
+    .from('matches')
+    .select('*')
+    .eq('tournament_id', tournamentId)
+    .order('round', { ascending: true })
+    .order('match_number', { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as unknown as TournamentMatchResult[];
+}
+
+/** Drawn but unplayed: both sides known, no winner yet. Byes are already settled. */
+export function pendingMatches(matches: TournamentMatchResult[]) {
+  return matches.filter(
+    (match) => !isMatchDecided(match) && !!match.player1_name && !!match.player2_name
+  );
+}
+
 export async function fetchCategoryMatches(tournamentId: string, categoryId: string) {
   const { data, error } = await supabase
     .from('matches')

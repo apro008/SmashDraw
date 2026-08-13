@@ -15,6 +15,19 @@ const TOURNAMENT_SELECT = `
   categories:tournament_categories(*)
 `;
 
+/*
+ * `registrations` has two foreign keys into `profiles` — `user_id` and the
+ * `added_by` column `features.sql` adds for organizer-created entries — so a
+ * bare `profiles(...)` embed is ambiguous and PostgREST rejects the whole query
+ * with "more than one relationship was found". `!user_id` names the column the
+ * embed must follow.
+ */
+const REGISTRATION_SELECT = `
+  *,
+  category:tournament_categories(*),
+  player:profiles!user_id(id,name,email,phone,city,state)
+`;
+
 /** A tournament is treated as finished/closed this many days after its end date. */
 export const TOURNAMENT_CLOSE_AFTER_DAYS = 7;
 
@@ -213,13 +226,7 @@ export interface TournamentRegistrationDetails extends Registration {
 export async function fetchTournamentRegistrations(tournamentId: string) {
   const { data, error } = await supabase
     .from('registrations')
-    .select(
-      `
-      *,
-      category:tournament_categories(*),
-      player:profiles(id,name,email,phone,city,state)
-    `
-    )
+    .select(REGISTRATION_SELECT)
     .eq('tournament_id', tournamentId)
     .order('created_at', { ascending: false });
 
@@ -236,13 +243,7 @@ export async function fetchTournamentRegistrations(tournamentId: string) {
 export async function fetchUserTournamentRegistrations(tournamentId: string, userId: string) {
   const { data, error } = await supabase
     .from('registrations')
-    .select(
-      `
-      *,
-      category:tournament_categories(*),
-      player:profiles(id,name,email,phone,city,state)
-    `
-    )
+    .select(REGISTRATION_SELECT)
     .eq('tournament_id', tournamentId)
     .eq('user_id', userId)
     .order('created_at', { ascending: false });

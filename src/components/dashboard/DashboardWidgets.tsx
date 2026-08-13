@@ -199,6 +199,11 @@ export function TournamentSnippet({ tournament, onPress }: TournamentSnippetProp
 
 // ─── Charts (used by organizer/admin dashboards) ───────────────────────────────
 
+/**
+ * Ranked magnitudes across one dimension. Height already encodes the value, so
+ * every bar wears the same colour — a hue per bar would imply a category
+ * difference that isn't there.
+ */
 export function BarChart({ data, title }: { data: ChartDatum[]; title: string }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -217,6 +222,9 @@ export function BarChart({ data, title }: { data: ChartDatum[]; title: string })
           const height = Math.max((item.value / maxValue) * 112, item.value > 0 ? 14 : 6);
           return (
             <View key={item.label} style={styles.barSlot}>
+              <AppText variant="xs" weight="semiBold" color={colors.textSecondary}>
+                {item.value}
+              </AppText>
               <View style={styles.barTrack}>
                 <View
                   style={[
@@ -228,16 +236,8 @@ export function BarChart({ data, title }: { data: ChartDatum[]; title: string })
                   ]}
                 />
               </View>
-              <AppText
-                variant="xs"
-                weight="semiBold"
-                color={colors.textSecondary}
-                numberOfLines={1}
-              >
+              <AppText variant="xs" color={colors.textMuted} numberOfLines={1}>
                 {item.label}
-              </AppText>
-              <AppText variant="xs" color={colors.textMuted}>
-                {item.value}
               </AppText>
             </View>
           );
@@ -251,6 +251,9 @@ export function StatusChart({ data, title }: { data: ChartDatum[]; title: string
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const total = data.reduce((sum, item) => sum + item.value, 0);
+  // Only statuses that actually occur get a band. Giving an empty status a
+  // minimum width made the bar claim tournaments that do not exist.
+  const present = data.filter((item) => item.value > 0);
 
   return (
     <View style={styles.chartCard}>
@@ -263,15 +266,12 @@ export function StatusChart({ data, title }: { data: ChartDatum[]; title: string
         </AppText>
       </View>
       <View style={styles.segmentTrack}>
-        {data.map((item) => (
+        {present.map((item) => (
           <View
             key={item.label}
             style={[
               styles.segment,
-              {
-                backgroundColor: item.color ?? colors.primary,
-                flex: total > 0 ? Math.max(item.value, 0.2) : 1,
-              },
+              { backgroundColor: item.color ?? colors.primary, flex: item.value },
             ]}
           />
         ))}
@@ -279,16 +279,28 @@ export function StatusChart({ data, title }: { data: ChartDatum[]; title: string
       <View style={styles.legendGrid}>
         {data.map((item) => (
           <View key={item.label} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: item.color ?? colors.primary }]} />
+            <View
+              style={[
+                styles.legendDot,
+                {
+                  backgroundColor: item.color ?? colors.primary,
+                  opacity: item.value > 0 ? 1 : 0.3,
+                },
+              ]}
+            />
             <AppText
               variant="xs"
-              color={colors.textSecondary}
+              color={item.value > 0 ? colors.textSecondary : colors.textMuted}
               numberOfLines={1}
               style={{ flex: 1 }}
             >
               {item.label}
             </AppText>
-            <AppText variant="xs" weight="semiBold">
+            <AppText
+              variant="xs"
+              weight="semiBold"
+              color={item.value > 0 ? colors.text : colors.textMuted}
+            >
               {item.value}
             </AppText>
           </View>
@@ -298,6 +310,10 @@ export function StatusChart({ data, title }: { data: ChartDatum[]; title: string
   );
 }
 
+/**
+ * One measure over time. It is a single series, so it is a single colour —
+ * the earlier hue-per-bar read as six unrelated categories.
+ */
 export function TrendGraph({ data, title }: { data: ChartDatum[]; title: string }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -316,12 +332,20 @@ export function TrendGraph({ data, title }: { data: ChartDatum[]; title: string 
           const height = Math.max((item.value / maxValue) * 86, item.value > 0 ? 12 : 5);
           return (
             <View key={`${item.label}-${index}`} style={styles.sparkSlot}>
+              <AppText
+                variant="xs"
+                weight="semiBold"
+                color={item.value > 0 ? colors.textSecondary : colors.textMuted}
+              >
+                {item.value}
+              </AppText>
               <View
                 style={[
                   styles.sparkBar,
                   {
                     backgroundColor: item.color ?? colors.primary,
                     height,
+                    opacity: item.value > 0 ? 1 : 0.35,
                   },
                 ]}
               />
@@ -341,13 +365,18 @@ export function TrendGraph({ data, title }: { data: ChartDatum[]; title: string 
 function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     // MetricTile
+    /*
+     * `flex: 1` sets a zero basis, which fought `minWidth` and let a wrapped row
+     * lay out with mismatched tile widths. A percentage basis plus grow keeps a
+     * true 2 × 2 grid: two tiles a row, the pair sharing the leftover evenly.
+     */
     metricTile: {
       backgroundColor: colors.surface,
       borderColor: colors.border,
       borderRadius: 14,
       borderWidth: 1,
-      flex: 1,
-      minWidth: '46%',
+      flexBasis: '46%',
+      flexGrow: 1,
       padding: 14,
     },
     metricIcon: {
@@ -475,11 +504,15 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       justifyContent: 'space-between',
       marginBottom: 14,
     },
+    /*
+     * No fixed height here. The old 158 was exactly the track plus two label
+     * lines, so a value that wrapped to a second line spilled out of the card.
+     * The 118 track sets the scale; the row grows to fit its labels.
+     */
     barArea: {
       alignItems: 'flex-end',
       flexDirection: 'row',
       gap: 8,
-      height: 158,
     },
     barSlot: {
       alignItems: 'center',
@@ -490,15 +523,15 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     barTrack: {
       alignItems: 'center',
       backgroundColor: colors.background,
-      borderRadius: 10,
+      borderRadius: 8,
       height: 118,
       justifyContent: 'flex-end',
       overflow: 'hidden',
       width: '100%',
     },
     barFill: {
-      borderTopLeftRadius: 10,
-      borderTopRightRadius: 10,
+      borderTopLeftRadius: 4,
+      borderTopRightRadius: 4,
       width: '100%',
     },
     segmentTrack: {
@@ -530,7 +563,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'flex-end',
       flexDirection: 'row',
       gap: 6,
-      height: 122,
+      minHeight: 122,
     },
     sparkSlot: {
       alignItems: 'center',
@@ -538,8 +571,11 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       gap: 6,
       justifyContent: 'flex-end',
     },
+    // Rounded at the top only — a full pill floats free of the baseline the
+    // heights are measured from.
     sparkBar: {
-      borderRadius: 999,
+      borderTopLeftRadius: 4,
+      borderTopRightRadius: 4,
       width: '68%',
     },
   });

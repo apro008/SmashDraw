@@ -7,7 +7,9 @@ import { Tournament, TournamentStatus } from '~/types';
 import { getEffectiveTournamentStatus } from '~/lib/tournaments';
 
 // ─── Status config ─────────────────────────────────────────────────────────────
-// Solid colored pill with white text; "Ended" uses a light neutral.
+// Solid coloured pill with white text throughout. "Ended" was a near-white pill,
+// which disappeared into the light banner artwork and read as unstyled in dark
+// mode — it is a solid slate now, so a finished event is legible at a glance.
 const STATUS_CONFIG: Record<
   TournamentStatus,
   { label: string; color: string; bg: string; dot?: boolean }
@@ -15,7 +17,7 @@ const STATUS_CONFIG: Record<
   open: { label: 'Open', color: '#fff', bg: '#16A34A' },
   ongoing: { label: 'Live', color: '#fff', bg: '#EA580C', dot: true },
   paused: { label: 'Paused', color: '#fff', bg: '#7C3AED' },
-  completed: { label: 'Ended', color: '#52525B', bg: '#F4F4F5' },
+  completed: { label: 'Ended', color: '#fff', bg: '#475569' },
   draft: { label: 'Draft', color: '#fff', bg: '#374151' },
   cancelled: { label: 'Cancelled', color: '#fff', bg: '#DC2626' },
 };

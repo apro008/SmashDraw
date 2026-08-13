@@ -26,6 +26,7 @@ import {
   updateRegistrationStatus,
   updateTournamentStatus,
 } from '~/lib/tournaments';
+import { fetchTournamentMatches, pendingMatches, roundLabel } from '~/lib/draw';
 import { AddEntrySheet } from '~/components/tournament/AddEntrySheet';
 import { RegistrationSheet } from '~/components/tournament/RegistrationSheet';
 import { ResultEntrySheet } from '~/components/tournament/ResultEntrySheet';
@@ -763,6 +764,8 @@ export default function TournamentDetailScreen() {
   const [registrations, setRegistrations] = useState<TournamentRegistrationDetails[]>([]);
   const [myRegistrations, setMyRegistrations] = useState<TournamentRegistrationDetails[]>([]);
   const [results, setResults] = useState<TournamentMatchResult[]>([]);
+  const [matches, setMatches] = useState<TournamentMatchResult[]>([]);
+  const [resultMatch, setResultMatch] = useState<TournamentMatchResult | null>(null);
   const [updatingRegistrationId, setUpdatingRegistrationId] = useState<string | null>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [resultEntryVisible, setResultEntryVisible] = useState(false);
@@ -786,6 +789,9 @@ export default function TournamentDetailScreen() {
       }
       setTournament(next);
       setResults(next ? await fetchTournamentResults(id) : []);
+      // The whole bracket, not just the played matches — this is what tells the
+      // screen a draw exists and which fixtures are still waiting on a score.
+      setMatches(next ? await fetchTournamentMatches(id) : []);
       setRegistrations(canViewReg ? await fetchTournamentRegistrations(id) : []);
       const loadMyEntries = !!next && !!user?.id && next.organizer_id !== user.id;
       setMyRegistrations(loadMyEntries ? await fetchUserTournamentRegistrations(id, user.id) : []);
@@ -882,6 +888,25 @@ export default function TournamentDetailScreen() {
   const myResults = user?.id
     ? results.filter((r) => r.player1_id === user.id || r.player2_id === user.id)
     : [];
+
+  const drawPublished = matches.length > 0;
+  const pendingDrawMatches = pendingMatches(matches);
+  const categoryNameById = new Map(
+    (tournament.categories ?? []).map((category) => [category.id, category.name])
+  );
+  // Round 1's size fixes a category's bracket, so its depth follows from the
+  // number of opening matches — that is what turns a round number into "Semi-final".
+  const roundsByCategory = matches.reduce<Record<string, number>>((acc, match) => {
+    if (match.round === 1) acc[match.category_id] = (acc[match.category_id] ?? 0) + 1;
+    return acc;
+  }, {});
+  const depthOf = (categoryId: string) =>
+    roundsByCategory[categoryId] ? Math.log2(roundsByCategory[categoryId] * 2) : 0;
+
+  const openResultSheet = (match: TournamentMatchResult | null) => {
+    setResultMatch(match);
+    setResultEntryVisible(true);
+  };
 
   const approvedCount = registrations.filter((r) => r.status === 'approved').length;
   const pendingCount = registrations.filter((r) => r.status === 'pending').length;
@@ -1124,6 +1149,37 @@ export default function TournamentDetailScreen() {
           />
         </ScrollView>
 
+        {/* ── Draw (everyone, once it is published) ── */}
+        {drawPublished ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionAccentDot, { backgroundColor: accentColor }]} />
+              <View style={{ flex: 1 }}>
+                <AppText variant="title" weight="semiBold">
+                  Draw
+                </AppText>
+                <AppText variant="xs" color={colors.textMuted}>
+                  {matches.length} match{matches.length === 1 ? '' : 'es'} drawn ·{' '}
+                  {pendingDrawMatches.length} still to play
+                </AppText>
+              </View>
+            </View>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() =>
+                router.push({ pathname: '/(app)/draw/[id]', params: { id: tournament.id } })
+              }
+              style={styles.manageResultsLink}
+            >
+              <Ionicons name="git-branch-outline" size={15} color={colors.primary} />
+              <AppText variant="label" weight="semiBold" color={colors.primary} style={{ flex: 1 }}>
+                See the bracket and who you play
+              </AppText>
+              <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* ── Results ── */}
         {results.length > 0 || effectiveStatus === 'completed' ? (
           <View style={styles.section}>
@@ -1224,7 +1280,7 @@ export default function TournamentDetailScreen() {
               ) : null}
               <TouchableOpacity
                 activeOpacity={0.85}
-                onPress={() => setResultEntryVisible(true)}
+                onPress={() => openResultSheet(null)}
                 style={[styles.adminAction, styles.finishAction]}
               >
                 <Ionicons name="add-circle-outline" size={16} color="#fff" />
@@ -1233,6 +1289,43 @@ export default function TournamentDetailScreen() {
                 </AppText>
               </TouchableOpacity>
             </View>
+
+            {/*
+              Fixtures the draw already paired up. Opening one seeds the result
+              sheet with both sides and writes the score back to that same match,
+              so the bracket advances instead of gaining a duplicate row.
+            */}
+            {pendingDrawMatches.length > 0 ? (
+              <View style={styles.pendingMatchList}>
+                <AppText variant="xs" weight="semiBold" color={colors.textMuted}>
+                  WAITING ON A SCORE
+                </AppText>
+                {pendingDrawMatches.slice(0, 6).map((match) => (
+                  <TouchableOpacity
+                    key={match.id}
+                    activeOpacity={0.85}
+                    onPress={() => openResultSheet(match)}
+                    style={styles.pendingMatchRow}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <AppText variant="label" weight="semiBold" numberOfLines={1}>
+                        {match.player1_name} vs {match.player2_name}
+                      </AppText>
+                      <AppText variant="xs" color={colors.textMuted} numberOfLines={1}>
+                        {categoryNameById.get(match.category_id) ?? 'Category'} ·{' '}
+                        {roundLabel(match.round, depthOf(match.category_id))}
+                      </AppText>
+                    </View>
+                    <Ionicons name="create-outline" size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                ))}
+                {pendingDrawMatches.length > 6 ? (
+                  <AppText variant="xs" color={colors.textMuted}>
+                    +{pendingDrawMatches.length - 6} more in the draw
+                  </AppText>
+                ) : null}
+              </View>
+            ) : null}
             {results.length > 0 ? (
               <TouchableOpacity
                 activeOpacity={0.85}
@@ -1611,8 +1704,12 @@ export default function TournamentDetailScreen() {
           <ResultEntrySheet
             tournament={tournament}
             registrations={registrations}
+            initialResult={resultMatch}
             visible={resultEntryVisible}
-            onClose={() => setResultEntryVisible(false)}
+            onClose={() => {
+              setResultEntryVisible(false);
+              setResultMatch(null);
+            }}
             onSaved={loadTournament}
           />
           <AddEntrySheet
@@ -1935,6 +2032,22 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       marginTop: 10,
       minHeight: 46,
       paddingHorizontal: 14,
+    },
+    pendingMatchList: {
+      gap: 8,
+      marginTop: 12,
+    },
+    pendingMatchRow: {
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderRadius: 12,
+      borderWidth: 1,
+      flexDirection: 'row',
+      gap: 10,
+      minHeight: 52,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
     },
 
     // Registrations

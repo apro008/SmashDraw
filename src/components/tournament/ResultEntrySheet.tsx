@@ -71,6 +71,9 @@ export function ResultEntrySheet({
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const isEditing = !!initialResult;
+  // A fixture opened straight from the draw has both sides but no score yet, so
+  // it is being recorded for the first time rather than corrected.
+  const isRecordingFixture = isEditing && !initialResult?.score;
 
   useEffect(() => {
     if (!visible) return;
@@ -182,10 +185,16 @@ export function ResultEntrySheet({
       }
       showAlert({
         type: 'success',
-        title: initialResult ? 'Result updated' : 'Result uploaded',
-        message: initialResult
-          ? 'The latest scorecard is now visible to players.'
-          : 'This match result is now visible to players. Other matches are unaffected.',
+        title: isRecordingFixture
+          ? 'Result saved'
+          : initialResult
+            ? 'Result updated'
+            : 'Result uploaded',
+        message: isRecordingFixture
+          ? 'The bracket is updated — build the next round from the draw screen.'
+          : initialResult
+            ? 'The latest scorecard is now visible to players.'
+            : 'This match result is now visible to players. Other matches are unaffected.',
       });
       onSaved();
       onClose();
@@ -207,12 +216,18 @@ export function ResultEntrySheet({
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <AppText variant="title" weight="bold">
-              {isEditing ? `Update Match #${initialResult?.match_number}` : 'Add Match Result'}
+              {isRecordingFixture
+                ? `Match #${initialResult?.match_number} Result`
+                : isEditing
+                  ? `Update Match #${initialResult?.match_number}`
+                  : 'Add Match Result'}
             </AppText>
             <AppText variant="caption" color={colors.textSecondary}>
-              {isEditing
-                ? 'Only this match is changed — every other result stays as it is.'
-                : 'Upload the result of a single match without ending the tournament.'}
+              {isRecordingFixture
+                ? 'Both sides come from the draw — just enter the score.'
+                : isEditing
+                  ? 'Only this match is changed — every other result stays as it is.'
+                  : 'Upload the result of a single match without ending the tournament.'}
             </AppText>
           </View>
           <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeButton}>

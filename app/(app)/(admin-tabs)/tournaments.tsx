@@ -12,6 +12,7 @@ import { Tournament } from '~/types';
 import {
   fetchAdminTournaments,
   getEffectiveTournamentStatus,
+  isTournamentEnded,
   updateTournamentStatus,
 } from '~/lib/tournaments';
 import { useAlert } from '~/providers/AlertProvider';
@@ -153,6 +154,7 @@ export default function AdminTournamentsScreen() {
           renderItem={({ item }) => (
             <TournamentCard
               tournament={item}
+              dimmed={isTournamentEnded(item)}
               onPress={() =>
                 router.push({ pathname: '/(app)/tournament/[id]', params: { id: item.id } })
               }

@@ -14,13 +14,13 @@ import {
   TrendGraph,
 } from '~/components/dashboard/DashboardWidgets';
 import { useTheme } from '~/hooks/useTheme';
-import { fetchAdminTournaments } from '~/lib/tournaments';
-import { supabase } from '~/lib/supabase';
+import { fetchAdminTournaments, getEffectiveTournamentStatus } from '~/lib/tournaments';
+import { fetchProfileCount } from '~/lib/profiles';
 import { useAlert } from '~/providers/AlertProvider';
 import { useAuthStore } from '~/store/useAuthStore';
-import { Tournament } from '~/types';
+import { Tournament, TournamentStatus } from '~/types';
 
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<TournamentStatus, string> = {
   draft: '#64748B',
   open: '#16A34A',
   ongoing: '#EA580C',
@@ -29,7 +29,7 @@ const STATUS_COLORS = {
   cancelled: '#DC2626',
 };
 
-const CHART_COLORS = ['#1A73E8', '#16A34A', '#F59E0B', '#7C3AED', '#EF4444'];
+const TREND_MONTHS = 6;
 
 export default function AdminDashboardScreen() {
   const { colors } = useTheme();
@@ -181,6 +181,13 @@ export default function AdminDashboardScreen() {
               </View>
               <View style={styles.actionGrid}>
                 <ActionTile
+                  icon="add-circle-outline"
+                  label="Create Tournament"
+                  note="Set up a new event"
+                  onPress={() => router.push('/(app)/(admin-tabs)/create')}
+                  tone="#16A34A"
+                />
+                <ActionTile
                   icon="people-outline"
                   label="Manage Users"
                   note="Review profiles"
@@ -232,18 +239,11 @@ export default function AdminDashboardScreen() {
   );
 }
 
-async function fetchProfileCount() {
-  const { count, error } = await supabase
-    .from('profiles')
-    .select('id', { count: 'exact', head: true });
-  if (error) throw error;
-  return count ?? 0;
-}
-
 function TournamentRow({ tournament }: { tournament: Tournament }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const statusColor = STATUS_COLORS[tournament.status];
+  const status = getEffectiveTournamentStatus(tournament);
+  const statusColor = STATUS_COLORS[status];
 
   return (
     <TouchableOpacity
@@ -266,73 +266,84 @@ function TournamentRow({ tournament }: { tournament: Tournament }) {
       </View>
       <View style={[styles.statusPill, { backgroundColor: `${statusColor}18` }]}>
         <AppText variant="xs" weight="semiBold" color={statusColor}>
-          {tournament.status}
+          {status}
         </AppText>
       </View>
     </TouchableOpacity>
   );
 }
 
+/*
+ * Every count is keyed off the *effective* status, the same thing the
+ * tournaments tab filters on — otherwise an event past its close window still
+ * counted as Open here while reading as Ended one tab over.
+ */
 function buildDashboard(tournaments: Tournament[]) {
-  const activeCount = tournaments.filter(
-    (tournament) => tournament.status === 'open' || tournament.status === 'ongoing'
-  ).length;
-  const completedCount = tournaments.filter(
-    (tournament) => tournament.status === 'completed'
-  ).length;
+  const byStatus = tournaments.reduce<Partial<Record<TournamentStatus, number>>>(
+    (acc, tournament) => {
+      const status = getEffectiveTournamentStatus(tournament);
+      acc[status] = (acc[status] ?? 0) + 1;
+      return acc;
+    },
+    {}
+  );
+  const count = (status: TournamentStatus) => byStatus[status] ?? 0;
 
   return {
-    activeCount,
-    cityData: topCounts(
-      tournaments.map((tournament) => tournament.city),
-      5
-    ),
-    completedCount,
+    activeCount: count('open') + count('ongoing'),
+    cityData: topCities(tournaments, 5),
+    completedCount: count('completed'),
     monthData: buildMonthData(tournaments),
+    // Ordered so no two neighbouring bands are a colour pair that converges
+    // under red-green colour blindness, and every status is listed even at zero.
     statusData: [
-      { label: 'Open', value: countStatus(tournaments, 'open'), color: STATUS_COLORS.open },
-      { label: 'Live', value: countStatus(tournaments, 'ongoing'), color: STATUS_COLORS.ongoing },
-      { label: 'Draft', value: countStatus(tournaments, 'draft'), color: STATUS_COLORS.draft },
-      { label: 'Done', value: completedCount, color: STATUS_COLORS.completed },
-      { label: 'Paused', value: countStatus(tournaments, 'paused'), color: STATUS_COLORS.paused },
+      { label: 'Open', value: count('open'), color: STATUS_COLORS.open },
+      { label: 'Live', value: count('ongoing'), color: STATUS_COLORS.ongoing },
+      { label: 'Paused', value: count('paused'), color: STATUS_COLORS.paused },
+      { label: 'Draft', value: count('draft'), color: STATUS_COLORS.draft },
+      { label: 'Done', value: count('completed'), color: STATUS_COLORS.completed },
+      { label: 'Cancelled', value: count('cancelled'), color: STATUS_COLORS.cancelled },
     ],
   };
 }
 
-function countStatus(tournaments: Tournament[], status: Tournament['status']) {
-  return tournaments.filter((tournament) => tournament.status === status).length;
-}
-
-function topCounts(values: string[], limit: number) {
-  const counts = values.reduce<Record<string, number>>((acc, value) => {
-    acc[value] = (acc[value] ?? 0) + 1;
-    return acc;
-  }, {});
-  const rows = Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([label, value], index) => ({
-      label,
-      value,
-      color: CHART_COLORS[index % CHART_COLORS.length],
-    }));
-  return rows.length > 0 ? rows : [{ label: 'None', value: 0, color: CHART_COLORS[0] }];
-}
-
-function buildMonthData(tournaments: Tournament[]) {
+function topCities(tournaments: Tournament[], limit: number) {
   const counts = tournaments.reduce<Record<string, number>>((acc, tournament) => {
-    const key = new Date(tournament.created_at).toLocaleDateString('en-IN', { month: 'short' });
-    acc[key] = (acc[key] ?? 0) + 1;
+    const city = tournament.city?.trim() || 'Unknown';
+    acc[city] = (acc[city] ?? 0) + 1;
     return acc;
   }, {});
   const rows = Object.entries(counts)
-    .slice(0, 6)
-    .map(([label, value], index) => ({
-      label,
-      value,
-      color: CHART_COLORS[index % CHART_COLORS.length],
-    }));
-  return rows.length > 0 ? rows : [{ label: 'Now', value: 0, color: CHART_COLORS[0] }];
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([label, value]) => ({ label, value }));
+  return rows.length > 0 ? rows : [{ label: 'None', value: 0 }];
+}
+
+/**
+ * The last six calendar months, oldest first — including the quiet ones. The
+ * old version keyed on the month name alone, so it lost the year, dropped empty
+ * months entirely, and ran newest-first, which made the trend unreadable.
+ */
+function buildMonthData(tournaments: Tournament[]) {
+  const now = new Date();
+  const months = Array.from({ length: TREND_MONTHS }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (TREND_MONTHS - 1 - index), 1);
+    return {
+      key: `${date.getFullYear()}-${date.getMonth()}`,
+      label: date.toLocaleDateString('en-IN', { month: 'short' }),
+      value: 0,
+    };
+  });
+  const byKey = new Map(months.map((month) => [month.key, month]));
+
+  for (const tournament of tournaments) {
+    const created = new Date(tournament.created_at);
+    const bucket = byKey.get(`${created.getFullYear()}-${created.getMonth()}`);
+    if (bucket) bucket.value += 1;
+  }
+
+  return months.map(({ label, value }) => ({ label, value }));
 }
 
 function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
