@@ -173,8 +173,10 @@ matches, players and roles, and tournament announcements.
   a copy of `src/types/index.ts`. Both must be updated alongside their originals
 - Login is email + password, gated on `profiles.role = 'admin'`;
   `admin/scripts/promote-admin.mjs` grants the role and can set a password
-- Entry creation needs `supabase/features.sql`, which is not yet applied to the
-  live database
+- Entry creation needs `supabase/features.sql`, which **is** applied to the live
+  database — its `registrations.added_by` column is the second foreign key into
+  `profiles`, so any `profiles(...)` embed on `registrations` must be hinted
+  (`player:profiles!user_id(...)`) or PostgREST rejects the query as ambiguous
 
 ## Common Style Values
 

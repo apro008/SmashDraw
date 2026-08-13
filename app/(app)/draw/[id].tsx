@@ -95,6 +95,21 @@ export default function DrawScreen() {
   );
 
   const access = getResultAccess(tournament, user?.id, profile?.role);
+
+  const myName = profile?.name?.trim().toLowerCase() ?? '';
+  const isMyMatch = useCallback(
+    (match: TournamentMatchResult) => {
+      if (user?.id && (match.player1_id === user.id || match.player2_id === user.id)) return true;
+      // A doubles side is stored as one combined team name, so an id check alone
+      // misses the partner — fall back to looking for the viewer's own name.
+      if (!myName) return false;
+      return [match.player1_name, match.player2_name].some((name) =>
+        name?.toLowerCase().includes(myName)
+      );
+    },
+    [myName, user?.id]
+  );
+
   const rounds = useMemo(() => {
     const highest = latestRound(matches);
     return Array.from({ length: highest }, (_, index) => matchesInRound(matches, index + 1));
@@ -224,14 +239,14 @@ export default function DrawScreen() {
     );
   }
 
-  if (!tournament || !access.canManage) {
+  if (!tournament) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <NavBar colors={colors} styles={styles} subtitle={null} />
         <View style={styles.centered}>
           <Ionicons name="lock-closed-outline" size={44} color={colors.textMuted} />
           <AppText variant="title" color={colors.textMuted} center style={{ marginTop: 12 }}>
-            {tournament ? 'Only the organizer can manage the draw' : 'Tournament not found'}
+            Tournament not found
           </AppText>
         </View>
       </SafeAreaView>
@@ -280,8 +295,9 @@ export default function DrawScreen() {
             ) : null}
           </View>
           <AppText variant="caption" color={colors.textSecondary}>
-            The draw is a straight shuffle — no seeding. Entries are padded out to a full bracket
-            with byes, and a bye advances automatically.
+            {access.canManage
+              ? 'The draw is a straight shuffle — no seeding. Entries are padded out to a full bracket with byes, and a bye advances automatically.'
+              : 'The draw is a straight shuffle — no seeding. Your own matches are marked "You".'}
           </AppText>
         </View>
 
@@ -298,7 +314,9 @@ export default function DrawScreen() {
           <View style={styles.emptyCard}>
             <Ionicons name="git-branch-outline" size={40} color={colors.textMuted} />
             <AppText variant="body" color={colors.textSecondary} center style={{ marginTop: 10 }}>
-              No draw yet for {category?.name ?? 'this category'}.
+              {access.canManage
+                ? `No draw yet for ${category?.name ?? 'this category'}.`
+                : `The ${category?.name ?? ''} draw has not been published yet. You will get a notification when it is.`}
             </AppText>
           </View>
         ) : (
@@ -313,6 +331,7 @@ export default function DrawScreen() {
                     key={match.id}
                     colors={colors}
                     isFirst={matchIndex === 0}
+                    isMine={isMyMatch(match)}
                     match={match}
                     styles={styles}
                   />
@@ -322,7 +341,7 @@ export default function DrawScreen() {
           ))
         )}
 
-        {nextRoundPairings ? (
+        {nextRoundPairings && access.canManage ? (
           <AppButton
             title={`Build ${roundLabel(currentRound + 1, totalRounds)}`}
             onPress={handleNextRound}
@@ -332,7 +351,7 @@ export default function DrawScreen() {
           />
         ) : null}
 
-        {rounds.length > 0 ? (
+        {rounds.length > 0 && access.canManage ? (
           <Pressable accessibilityRole="button" onPress={handleClear} style={styles.clearButton}>
             <AppText variant="caption" weight="semiBold" color={colors.danger}>
               Clear draw
@@ -340,17 +359,19 @@ export default function DrawScreen() {
           </Pressable>
         ) : null}
 
-        <View style={{ height: 90 }} />
+        <View style={{ height: access.canManage ? 90 : 24 }} />
       </ScrollView>
 
-      <SafeAreaView edges={['bottom']} style={styles.bottomBar}>
-        <AppButton
-          title={rounds.length === 0 ? 'Generate Draw' : 'Regenerate Draw'}
-          onPress={handleGenerate}
-          loading={working}
-          disabled={!category}
-        />
-      </SafeAreaView>
+      {access.canManage ? (
+        <SafeAreaView edges={['bottom']} style={styles.bottomBar}>
+          <AppButton
+            title={rounds.length === 0 ? 'Generate Draw' : 'Regenerate Draw'}
+            onPress={handleGenerate}
+            loading={working}
+            disabled={!category}
+          />
+        </SafeAreaView>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -386,11 +407,13 @@ function NavBar({
 function MatchRow({
   colors,
   isFirst,
+  isMine,
   match,
   styles,
 }: {
   colors: ReturnType<typeof useTheme>['colors'];
   isFirst: boolean;
+  isMine: boolean;
   match: TournamentMatchResult;
   styles: ReturnType<typeof makeStyles>;
 }) {
@@ -399,9 +422,15 @@ function MatchRow({
   const winnerName = match.winner_name;
 
   return (
-    <View style={[styles.matchRow, isFirst ? null : styles.matchRowDivider]}>
+    <View
+      style={[
+        styles.matchRow,
+        isFirst ? null : styles.matchRowDivider,
+        isMine ? styles.matchRowMine : null,
+      ]}
+    >
       <View style={styles.matchNumber}>
-        <AppText variant="xs" weight="semiBold" color={colors.textMuted}>
+        <AppText variant="xs" weight="semiBold" color={isMine ? colors.primary : colors.textMuted}>
           {match.match_number}
         </AppText>
       </View>
@@ -424,6 +453,13 @@ function MatchRow({
         </AppText>
       ) : bye ? (
         <Ionicons name="arrow-forward" size={15} color={colors.textMuted} />
+      ) : null}
+      {isMine ? (
+        <View style={styles.minePill}>
+          <AppText variant="xs" weight="bold" color={colors.primary}>
+            You
+          </AppText>
+        </View>
       ) : null}
     </View>
   );
@@ -556,6 +592,19 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     matchRowDivider: {
       borderTopColor: colors.border,
       borderTopWidth: 1,
+    },
+    // The viewer's own fixture, so a player can find themselves in a full bracket.
+    matchRowMine: {
+      backgroundColor: colors.primary + '12',
+      borderRadius: 10,
+      marginHorizontal: -6,
+      paddingHorizontal: 6,
+    },
+    minePill: {
+      backgroundColor: colors.primary + '1F',
+      borderRadius: 999,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
     },
     matchNumber: {
       alignItems: 'center',
